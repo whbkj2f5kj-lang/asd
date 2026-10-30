@@ -40,7 +40,7 @@ val downloadModel by tasks.registering {
     onlyIf { !modelFile.exists() }
     doLast {
         modelFile.parentFile.mkdirs()
-        java.net.URI(modelUrl).toURL().openStream().use { input ->
+        uri(modelUrl).toURL().openStream().use { input: java.io.InputStream ->
             modelFile.outputStream().use { output -> input.copyTo(output) }
         }
     }
