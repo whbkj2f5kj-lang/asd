@@ -34,11 +34,7 @@ class VoiceInput(
         override fun onError(error: Int) {
             _listening.value = false
             if (error == SpeechRecognizer.ERROR_CLIENT) return
-            if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                onFail("Ich habe nichts verstanden.")
-            } else {
-                onFail("Spracherkennung gerade nicht verfügbar (Fehler $error).")
-            }
+            onFail(explain(error))
         }
 
         override fun onResults(results: Bundle?) {
@@ -46,6 +42,23 @@ class VoiceInput(
             val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
             if (text.isNullOrBlank()) onFail("Ich habe nichts verstanden.") else onText(text)
         }
+    }
+
+    /** Fehlernummern der Android-Spracherkennung in verständliche Sätze übersetzen. */
+    private fun explain(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+            "Ich habe nichts verstanden. Tippe aufs Mikrofon und sprich direkt danach."
+        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+            "Die Spracherkennung braucht gerade Internet. Bitte Hotspot oder WLAN prüfen – oder in den Google-Einstellungen Deutsch offline herunterladen."
+        SpeechRecognizer.ERROR_AUDIO ->
+            "Das Mikrofon liefert keinen Ton. Prüfe, ob das Radio-Mikrofon angeschlossen ist und keine andere App es benutzt."
+        SpeechRecognizer.ERROR_SERVER ->
+            "Der Sprachdienst hat einen Fehler gemeldet. Bitte gleich noch einmal versuchen."
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+            "Die Spracherkennung ist noch beschäftigt. Einen Moment warten und erneut tippen."
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+            "Mir fehlt die Mikrofon-Berechtigung. Bitte in den Android-Einstellungen für die App erlauben."
+        else -> "Die Spracherkennung hat nicht funktioniert (Code $error). Bitte erneut versuchen."
     }
 
     fun start() {

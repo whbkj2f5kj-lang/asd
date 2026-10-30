@@ -28,6 +28,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val obd = ObdManager(app, viewModelScope)
     val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
+
+    data class DiagState(
+        val busy: Boolean = false,
+        val result: de.jarvis.w204.obd.DtcResult? = null,
+        val error: String? = null,
+        val readAt: String? = null,
+    )
+    val diag = MutableStateFlow(DiagState())
+
+    fun readFaults() {
+        if (diag.value.busy) return
+        diag.value = diag.value.copy(busy = true, error = null)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val r = de.jarvis.w204.obd.DtcReader.read(obd)
+                val t = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date())
+                diag.value = DiagState(result = r, readAt = t)
+                jarvis.say(faultSummary(r))
+            } catch (t: Throwable) {
+                diag.value = diag.value.copy(busy = false, error = t.message ?: "Auslesen fehlgeschlagen")
+            }
+        }
+    }
+
+    private fun faultSummary(r: de.jarvis.w204.obd.DtcResult?): String {
+        if (r == null) return "Ich habe den Fehlerspeicher noch nicht ausgelesen. Öffne dazu die Diagnose."
+        val codes = r.codes.distinctBy { it.code }
+        if (codes.isEmpty()) return if (r.mil == true) "Die Motorkontrollleuchte ist an, aber ich finde keinen Fehlercode." else "Keine Fehler gespeichert."
+        val worst = codes.maxByOrNull { it.info.severity }!!
+        val head = if (codes.size == 1) "Ein Fehler gespeichert." else "${codes.size} Fehler gespeichert."
+        val urgent = when (worst.info.severity) {
+            3 -> " Achtung: ${worst.info.title}. Bitte sicher anhalten."
+            2 -> " Wichtigster: ${worst.info.title}. Bitte zeitnah prüfen lassen."
+            else -> " Nichts Dringendes. Wichtigster: ${worst.info.title}."
+        }
+        return head + urgent
+    }
     val jarvis = Jarvis(app)
     private val brain = JarvisBrain(jarvis)
 
@@ -168,6 +205,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onVoiceQuery(text: String) {
+        val q = text.lowercase(java.util.Locale.GERMAN)
+        if (listOf("fehler", "diagnose", "fehlerspeicher", "kontrollleuchte", "motorleuchte").any { it in q }) {
+            jarvis.say(faultSummary(diag.value.result))
+            return
+        }
         jarvis.say(brain.answer(text, obd.vehicle.value, _speedLimit.value, _scene.value.leadDistance))
     }
 

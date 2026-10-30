@@ -33,17 +33,21 @@ class ReadOnlyViolation(cmd: String) : IllegalArgumentException("Blockiert – n
 object ReadOnly {
     /**
      * 01/09 = OBD-Messwerte/Fahrzeuginfo lesen, 1A = KWP-Kennung lesen,
-     * 21 = KWP-Messwert lesen, 22 = UDS-Datenkennung lesen.
+     * 21 = KWP-Messwert lesen, 22 = UDS-Datenkennung lesen,
+     * 03/07/0A = OBD-Fehlercodes lesen, 18 = KWP-Fehlerspeicher lesen, 19 (01/02/0A) = UDS-Fehlerspeicher lesen.
      * Alles andere (Fehler löschen 04/14, Codieren 2E/3B, Routinen 31, Stellglieder 2F/30,
      * Sitzungen 10, Freischaltung 27, Reset 11 …) ist gesperrt.
      */
-    private val allowed = setOf("01", "09", "1A", "21", "22")
+    private val allowed = setOf("01", "03", "07", "09", "0A", "18", "1A", "21", "22")
 
     fun isAllowed(cmd: String): Boolean {
         val c = cmd.uppercase().replace(" ", "")
         if (c.length < 2 || c.length > 8 || c.length % 2 != 0) return false
         if (!c.all { it in "0123456789ABCDEF" }) return false
-        return c.substring(0, 2) in allowed
+        val sid = c.substring(0, 2)
+        // 19 = UDS Fehlerspeicher: nur die lesenden Unterfunktionen 01 (Anzahl), 02 (Liste), 0A (alle unterstützten)
+        if (sid == "19") return c.length >= 4 && c.substring(2, 4) in setOf("01", "02", "0A")
+        return sid in allowed
     }
 }
 

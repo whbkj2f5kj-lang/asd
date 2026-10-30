@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' --tests 'de.jarvis.w204.DiagTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
+          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' --tests 'de.jarvis.w204.DiagTest' --tests 'de.jarvis.w204.DtcTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
 
       - name: Fehler zusammenfassen
         if: failure()

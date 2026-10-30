@@ -99,6 +99,11 @@ fun DashboardApp(vm: MainViewModel) {
     val scene by vm.scene.collectAsStateWithLifecycle()
     val message by vm.jarvis.message.collectAsStateWithLifecycle()
 
+    var showDiagnose by remember { mutableStateOf(false) }
+    val diag by vm.diag.collectAsStateWithLifecycle()
+    val faultCodes = diag.result?.codes?.distinctBy { it.code }.orEmpty()
+    val faults = faultCodes.size
+    val faultSeverity = faultCodes.maxOfOrNull { it.info.severity } ?: 0
     var showSettings by remember { mutableStateOf(settings.deviceAddress == null && !settings.demo) }
     var cameraFull by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
@@ -134,6 +139,9 @@ fun DashboardApp(vm: MainViewModel) {
                 listening = listening,
                 onMic = { voice.start() },
                 onSettings = { showSettings = true },
+                faults = faults,
+                faultSeverity = faultSeverity,
+                onDiagnose = { showDiagnose = true },
             ) {
                 ScenePanel(
                     vm = vm,
@@ -152,7 +160,8 @@ fun DashboardApp(vm: MainViewModel) {
                 )
             }
         } else Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
-            TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true })
+            TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true },
+                faults = faults, faultSeverity = faultSeverity, onDiagnose = { showDiagnose = true })
             Spacer(Modifier.height(10.dp))
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DrivePanel(vehicle, Modifier.weight(1.05f).fillMaxHeight())
@@ -175,6 +184,7 @@ fun DashboardApp(vm: MainViewModel) {
         }
         if (cameraFull) FullscreenCamera(vm, camGranted, currentLimit, over, onClose = { cameraFull = false })
         if (showSettings) SettingsScreen(vm, onClose = { showSettings = false })
+        if (showDiagnose) DiagnoseScreen(vm, onClose = { showDiagnose = false })
         val crash by vm.crashReport.collectAsStateWithLifecycle()
         crash?.let { (report, off) -> CrashScreen(report.text, off, onClose = { vm.dismissCrash() }) }
     }
@@ -212,7 +222,16 @@ private fun CrashScreen(text: String, disabled: List<String>, onClose: () -> Uni
 // ---------------- Kopfzeile ----------------
 
 @Composable
-private fun TopBar(status: ObdStatus, message: String?, listening: Boolean, onMic: () -> Unit, onSettings: () -> Unit) {
+private fun TopBar(
+    status: ObdStatus,
+    message: String?,
+    listening: Boolean,
+    onMic: () -> Unit,
+    onSettings: () -> Unit,
+    faults: Int,
+    faultSeverity: Int,
+    onDiagnose: () -> Unit,
+) {
     var showMessage by remember { mutableStateOf(false) }
     LaunchedEffect(message) {
         if (message != null) {
@@ -243,6 +262,8 @@ private fun TopBar(status: ObdStatus, message: String?, listening: Boolean, onMi
         Spacer(Modifier.width(16.dp))
         Clock()
         Spacer(Modifier.width(12.dp))
+        DiagButton(faults, faultSeverity, onDiagnose)
+        Spacer(Modifier.width(10.dp))
         MicButton(listening, onMic)
         IconButton(onClick = onSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "Einstellungen", tint = J.dim)

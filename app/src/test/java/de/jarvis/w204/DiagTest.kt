@@ -46,3 +46,58 @@ class DiagTest {
         assertTrue(ok.hex.startsWith("5A87"))
     }
 }
+
+class DtcTest {
+    @Test fun decodeLetters() {
+        org.junit.Assert.assertEquals("P0299", de.jarvis.w204.obd.DtcDecoder.decode(0x02, 0x99))
+        org.junit.Assert.assertEquals("P2463", de.jarvis.w204.obd.DtcDecoder.decode(0x24, 0x63))
+        org.junit.Assert.assertEquals("U0100", de.jarvis.w204.obd.DtcDecoder.decode(0xC1, 0x00))
+        org.junit.Assert.assertEquals("C1234", de.jarvis.w204.obd.DtcDecoder.decode(0x52, 0x34))
+        org.junit.Assert.assertEquals("B0001", de.jarvis.w204.obd.DtcDecoder.decode(0x80, 0x01))
+    }
+
+    @Test fun obdCanFormatWithCount() {
+        val codes = de.jarvis.w204.obd.DtcDecoder.parseObd("43 02 02 99 24 63\r", 0x03)
+        org.junit.Assert.assertEquals(listOf("P0299", "P2463"), codes)
+    }
+
+    @Test fun obdNoCodes() =
+        org.junit.Assert.assertEquals(emptyList<String>(), de.jarvis.w204.obd.DtcDecoder.parseObd("43 00\r", 0x03))
+
+    @Test fun obdTwoEcus() {
+        val codes = de.jarvis.w204.obd.DtcDecoder.parseObd("43 01 01 28\r43 01 07 00\r", 0x03)
+        org.junit.Assert.assertEquals(listOf("P0128", "P0700"), codes)
+    }
+
+    @Test fun kwp18() {
+        val list = de.jarvis.w204.obd.DtcDecoder.parseKwp18("5802" + "245360" + "029920")
+        org.junit.Assert.assertEquals(listOf("P2453" to 0x60, "P0299" to 0x20), list)
+    }
+
+    @Test fun uds1902() {
+        val list = de.jarvis.w204.obd.DtcDecoder.parseUds1902("5902FF" + "24630009" + "01280008")
+        org.junit.Assert.assertEquals("P2463", list[0].first)
+        org.junit.Assert.assertEquals("aktuell", de.jarvis.w204.obd.DtcDecoder.udsState(list[0].third))
+        org.junit.Assert.assertEquals("gespeichert", de.jarvis.w204.obd.DtcDecoder.udsState(list[1].third))
+    }
+
+    @Test fun databaseKnownAndFallback() {
+        val known = de.jarvis.w204.obd.DtcDatabase.lookup("P0299")
+        org.junit.Assert.assertTrue(known.known)
+        org.junit.Assert.assertEquals(2, known.severity)
+        val mb = de.jarvis.w204.obd.DtcDatabase.lookup("P1A0B")
+        org.junit.Assert.assertFalse(mb.known)
+        org.junit.Assert.assertTrue(mb.title.contains("Mercedes"))
+        org.junit.Assert.assertTrue(de.jarvis.w204.obd.DtcDatabase.system("P0471").contains("Abgas"))
+    }
+
+    @Test fun readOnlyDtcReads() {
+        listOf("03", "07", "0A", "1802FF00", "19020C", "1901FF", "190A").forEach {
+            org.junit.Assert.assertTrue(it, de.jarvis.w204.obd.ReadOnly.isAllowed(it))
+        }
+        // 14 = Fehler löschen, 04 = OBD-Fehler löschen, 19 mit unbekannter Unterfunktion
+        listOf("04", "14FFFF", "1904", "1914", "31010203").forEach {
+            org.junit.Assert.assertFalse(it, de.jarvis.w204.obd.ReadOnly.isAllowed(it))
+        }
+    }
+}

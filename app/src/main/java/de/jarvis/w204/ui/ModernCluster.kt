@@ -74,6 +74,9 @@ fun ModernCluster(
     listening: Boolean,
     onMic: () -> Unit,
     onSettings: () -> Unit,
+    faults: Int = 0,
+    faultSeverity: Int = 0,
+    onDiagnose: () -> Unit = {},
     center: @Composable BoxScope.() -> Unit,
 ) {
     BoxWithConstraints(
@@ -90,6 +93,8 @@ fun ModernCluster(
             ) {
                 StatusChip(status, onClick = onSettings)
                 Spacer(Modifier.weight(1f))
+                DiagButton(faults, faultSeverity, onDiagnose)
+                Spacer(Modifier.width(10.dp))
                 MicButton(listening, onMic)
                 IconButton(onClick = onSettings) {
                     Icon(Icons.Filled.Settings, contentDescription = "Einstellungen", tint = J.dim)
