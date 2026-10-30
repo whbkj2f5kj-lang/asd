@@ -13,6 +13,8 @@ enum class Pid(val code: Int, val bytes: Int) {
     MAF(0x10, 2),
     RAIL(0x23, 2),
     FUEL(0x2F, 1),
+    FUEL_RATE(0x5E, 2),
+    MAP_EXT(0x87, 5),
     BARO(0x33, 1),
     AMBIENT(0x46, 1);
 
@@ -65,6 +67,13 @@ object ObdParser {
         Pid.LOAD -> s.copy(load = d[0] * 100 / 255)
         Pid.COOLANT -> s.copy(coolant = d[0] - 40)
         Pid.MAP -> s.copy(mapKpa = d[0])
+        // 0x87: A = welche Sensoren, B-C = Sensor A, D-E = Sensor B (je 1/32 kPa) – reicht über 255 kPa hinaus
+        Pid.MAP_EXT -> when {
+            d[0] and 0x01 != 0 -> s.copy(mapKpa = (d[1] * 256 + d[2]) / 32)
+            d[0] and 0x02 != 0 -> s.copy(mapKpa = (d[3] * 256 + d[4]) / 32)
+            else -> s
+        }
+        Pid.FUEL_RATE -> s.copy(fuelRate = (d[0] * 256 + d[1]) / 20.0)
         Pid.RPM -> s.copy(rpm = (d[0] * 256 + d[1]) / 4)
         Pid.SPEED -> s.copy(speed = d[0])
         Pid.IAT -> s.copy(intakeTemp = d[0] - 40)

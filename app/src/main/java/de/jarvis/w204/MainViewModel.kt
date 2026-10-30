@@ -68,7 +68,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if ("ocr_init" in st || "ocr_run" in st || "mlkit" in t) {
                 s = s.copy(signRecognition = false); off += "Schildererkennung"
             }
-            if ("camera" in st || "frame" in st || "androidx.camera" in t) {
+            val visionStage = st.any { it.startsWith("vehicles") || it.startsWith("ocr") }
+            if ("camera" in st || ("frame" in st && !visionStage) || (st.isEmpty() && "androidx.camera" in t)) {
                 s = s.copy(cameraEnabled = false); off += "Kamera"
             }
             if (s != _settings.value) {

@@ -48,6 +48,7 @@ fun CameraFeed(
         val executor = Executors.newSingleThreadExecutor()
         val future = ProcessCameraProvider.getInstance(context)
         var provider: ProcessCameraProvider? = null
+        var bound: Array<androidx.camera.core.UseCase> = emptyArray()
         var disposed = false
 
         future.addListener({
@@ -87,6 +88,7 @@ fun CameraFeed(
                 CrashGuard.guard("camera") {
                     p.unbindAll()
                     p.bindToLifecycle(owner, selector, preview, analysis)
+                    bound = arrayOf(preview, analysis)
                 }
                 onError(null)
             } catch (t: Throwable) {
@@ -96,7 +98,7 @@ fun CameraFeed(
 
         onDispose {
             disposed = true
-            provider?.unbindAll()
+            if (bound.isNotEmpty()) runCatching { provider?.unbind(*bound) }
             executor.shutdown()
         }
     }

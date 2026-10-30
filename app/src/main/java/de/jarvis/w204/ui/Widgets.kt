@@ -131,7 +131,7 @@ fun ValueRow(label: String, value: String?, unit: String, state: Color?, modifie
             maxLines = 1,
         )
         Spacer(Modifier.width(5.dp))
-        Text(unit, color = J.dim, fontSize = 13.sp, maxLines = 1, modifier = Modifier.width(30.dp))
+        Text(unit, color = J.dim, fontSize = 13.sp, maxLines = 1, modifier = Modifier.width(38.dp))
     }
 }
 

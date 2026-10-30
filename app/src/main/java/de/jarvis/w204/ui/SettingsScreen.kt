@@ -94,7 +94,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Section("Verbindung")
                     Hint(status.message.ifBlank { status.state.name })
                     status.elmVersion?.let { Hint("Adapter: $it") }
-                    Hint("Abfragerate: ${String.format(Locale.GERMANY, "%.1f", status.rate)} Werte/s")
+                    Hint("Abfragerate: ${String.format(Locale.GERMANY, "%.1f", status.rate)} Werte/s" + if (status.fastMode) " · Schnellmodus" else "")
                     if (status.supportedPids.isNotEmpty()) {
                         Hint("Vom Steuergerät gemeldete PIDs: " + status.supportedPids.sorted().joinToString(" ") { "%02X".format(it) })
                     }
@@ -161,6 +161,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Spacer(Modifier.height(12.dp))
                     Section("Fahrzeug")
                     Hint("Mercedes-Benz W204 C 220 CDI · OM651\nDiagnose: ISO 15765-4 CAN, 11 Bit, 500 kBaud")
+                    Hint("App-Version ${de.jarvis.w204.BuildConfig.VERSION_NAME}")
                 }
             }
         }

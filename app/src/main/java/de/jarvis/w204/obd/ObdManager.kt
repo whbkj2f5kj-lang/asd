@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,30 +59,50 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
     private suspend fun runReal(address: String) {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
         while (currentCoroutineContext().isActive) {
+            // Lokale Referenz: ein alter, gerade abgebrochener Durchlauf darf nie die neue Verbindung schließen
+            var conn: Elm327? = null
             try {
                 if (adapter == null || !adapter.isEnabled) {
                     _status.value = ObdStatus(ConnState.BT_OFF, "Bluetooth ist ausgeschaltet")
                 } else {
                     _status.value = ObdStatus(ConnState.CONNECTING, "Verbinde mit ELM327 …")
                     val e = Elm327.connect(adapter, address)
+                    conn = e
                     elm = e
+                    currentCoroutineContext().ensureActive()
                     _status.value = ObdStatus(ConnState.INITIALIZING, "Initialisiere Adapter …")
                     val version = initialize(e)
                     val supported = querySupported(e)
-                    _status.value = ObdStatus(ConnState.CONNECTED, "Verbunden", version, supported)
-                    poll(e, supported)
+                    val suffix = detectFastMode(e)
+                    _status.value = ObdStatus(
+                        ConnState.CONNECTED, "Verbunden", version, supported,
+                        fastMode = suffix.isNotEmpty(),
+                    )
+                    poll(e, supported, suffix)
                 }
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
-                _status.update { it.copy(state = ConnState.ERROR, message = t.message ?: t.javaClass.simpleName) }
-                _vehicle.value = VehicleState()
+                // Nach stop() kommt hier eine IOException vom geschlossenen Socket an – dann nichts mehr melden
+                if (currentCoroutineContext().isActive) {
+                    _status.update { it.copy(state = ConnState.ERROR, message = t.message ?: t.javaClass.simpleName) }
+                    _vehicle.value = VehicleState()
+                }
             } finally {
-                elm?.close()
-                elm = null
+                conn?.close()
+                if (elm === conn) elm = null
             }
             delay(4000)
         }
+    }
+
+    /**
+     * Echte ELM327 (ab v1.3) und die meisten Klone verstehen eine angehängte Antwortanzahl ("010D1").
+     * Dann wartet der Adapter nicht mehr auf weitere Steuergeräte – deutlich mehr Werte pro Sekunde.
+     */
+    private fun detectFastMode(e: Elm327): String {
+        val r = runCatching { e.send("010D1", 2000) }.getOrDefault("")
+        return if (ObdParser.data(r, 0x0D, 1) != null) "1" else ""
     }
 
     private fun initialize(e: Elm327): String {
@@ -106,7 +127,7 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
 
     private fun querySupported(e: Elm327): Set<Int> {
         val all = mutableSetOf<Int>()
-        for (base in listOf(0x00, 0x20, 0x40)) {
+        for (base in listOf(0x00, 0x20, 0x40, 0x60, 0x80)) {
             if (base != 0x00 && base !in all) break
             val r = runCatching { e.send("01%02X".format(base), 3000) }.getOrDefault("")
             all += ObdParser.supported(r, base)
@@ -114,10 +135,12 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
         return all
     }
 
-    private suspend fun poll(e: Elm327, supported: Set<Int>) {
+    private suspend fun poll(e: Elm327, supported: Set<Int>, suffix: String) {
+        // Ladedruck: 0x0B endet bei 255 kPa (≈ 1,5 bar relativ) – der OM651 drückt mehr, daher 0x87 bevorzugen
+        val boostPid = if (Pid.MAP_EXT.code in supported) Pid.MAP_EXT else Pid.MAP
         // Schnelle Werte jede Runde, langsame reihum (alte ELM-Klone schaffen ~10–20 Abfragen/s)
-        val fast = listOf(Pid.RPM, Pid.SPEED, Pid.MAP, Pid.LOAD).filter { it.code in supported }
-        val slow = listOf(Pid.COOLANT, Pid.IAT, Pid.BARO, Pid.AMBIENT, Pid.RAIL, Pid.MAF, Pid.FUEL)
+        val fast = listOf(Pid.RPM, Pid.SPEED, boostPid, Pid.LOAD).filter { it.code in supported }
+        val slow = listOf(Pid.COOLANT, Pid.FUEL_RATE, Pid.IAT, Pid.BARO, Pid.AMBIENT, Pid.RAIL, Pid.MAF, Pid.FUEL)
             .filter { it.code in supported }
 
         var cycle = 0
@@ -134,7 +157,7 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
             var gotAny = false
             for (pid in batch) {
                 try {
-                    val r = e.send(pid.command)
+                    val r = e.send(pid.command + suffix)
                     timeouts = 0
                     count++
                     val d = ObdParser.data(r, pid.code, pid.bytes)
@@ -199,6 +222,7 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
                 ambient = 9,
                 railBar = (320 + boost * 900).toInt(),
                 maf = 20 + boost * 80,
+                fuelRate = 1.2 + boost * 9,
             )
             delay(100)
         }

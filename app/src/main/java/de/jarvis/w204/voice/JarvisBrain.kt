@@ -16,8 +16,11 @@ class JarvisBrain(private val jarvis: Jarvis) {
     private var overSince = 0L
     private var lowChargeSince = 0L
     private var gapSince = 0L
+    private var lastGreetAt = 0L
 
     fun onSessionStart() {
+        // Kurzer Abriss (Funkloch, Adapter-Neustart) ist keine neue Fahrt
+        if (lastGreetAt != 0L && SystemClock.elapsedRealtime() - lastGreetAt < 10 * 60_000L) return
         pendingGreeting = true
         sessionStart = SystemClock.elapsedRealtime()
         warmAnnounced = false
@@ -81,6 +84,7 @@ class JarvisBrain(private val jarvis: Jarvis) {
     }
 
     private fun greet(s: VehicleState) {
+        lastGreetAt = SystemClock.elapsedRealtime()
         val hello = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
             in 5..10 -> "Guten Morgen"
             in 11..17 -> "Guten Tag"
@@ -120,6 +124,10 @@ class JarvisBrain(private val jarvis: Jarvis) {
                 limit?.let { "Zuletzt erkannt: Tempolimit $it." } ?: "Ich habe noch kein Tempolimit erkannt."
             has("abstand", "vordermann", "vorne", "vor mir") ->
                 leadDistance?.let { "Etwa ${it.toInt()} Meter Abstand zum Vordermann." } ?: "Vor dir erkenne ich gerade kein Fahrzeug."
+            has("verbrauch", "verbrauche", "sprit", "diesel") ->
+                s.consumption?.let { "Aktuell ${fmt1(it)} Liter auf 100 Kilometer." }
+                    ?: s.fuelRate?.let { "Aktuell ${fmt1(it)} Liter pro Stunde." }
+                    ?: "Den Verbrauch liefert dein Steuergerät nicht."
             has("drehzahl", "touren") ->
                 s.rpm?.let { "$it Umdrehungen pro Minute." } ?: noData
             has("status", "bericht", "check", "wie geht", "alles") -> statusText(s)

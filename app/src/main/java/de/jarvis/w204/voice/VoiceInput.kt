@@ -33,6 +33,7 @@ class VoiceInput(
 
         override fun onError(error: Int) {
             _listening.value = false
+            if (error == SpeechRecognizer.ERROR_CLIENT) return
             if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                 onFail("Ich habe nichts verstanden.")
             } else {

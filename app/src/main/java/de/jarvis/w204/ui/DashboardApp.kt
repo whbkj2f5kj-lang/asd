@@ -362,7 +362,17 @@ private fun EnginePanel(v: VehicleState, modifier: Modifier) {
             Divider()
             ValueRow("Außen", v.ambient?.toString(), "°C", v.ambient?.let { if (it <= 3) J.cold else J.ok })
             Divider()
-            ValueRow("Raildruck", v.railBar?.toString(), "bar", v.railBar?.let { J.ok })
+            if (v.fuelRate != null) {
+                val per100 = v.consumption
+                ValueRow(
+                    "Verbrauch",
+                    fmt1(per100 ?: v.fuelRate),
+                    if (per100 != null) "l/100" else "l/h",
+                    J.accent,
+                )
+            } else {
+                ValueRow("Raildruck", v.railBar?.toString(), "bar", v.railBar?.let { J.ok })
+            }
         }
     }
 }
@@ -405,6 +415,7 @@ private fun ScenePanel(
     modifier: Modifier,
 ) {
     val detectorError by vm.vision.detectorError.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val lead = scene.leadDistance
     // Abstand im Verhältnis zu "halber Tacho"
     val gapColor = when {
@@ -416,7 +427,7 @@ private fun ScenePanel(
 
     Box(modifier.panel()) {
         // Kamera läuft immer (für die Erkennung), die Spuransicht liegt darüber
-        if (camGranted && cameraBound && vm.settings.collectAsStateWithLifecycle().value.cameraEnabled) {
+        if (camGranted && cameraBound && settings.cameraEnabled) {
             CameraWithOverlay(vm, Modifier.fillMaxSize(), showHorizon = false, onClick = { if (showCamera) onExpand() })
         }
         if (!showCamera) {
@@ -433,7 +444,9 @@ private fun ScenePanel(
         }
 
         val hint = when {
-            !camGranted -> "Kamera-Berechtigung fehlt"
+            !settings.cameraEnabled -> "Kamera aus (Einstellungen)"
+            !camGranted -> "Kamera-Berechtigung fehlt – antippen"
+            !settings.objectRecognition && !showCamera -> "Fahrzeugerkennung aus"
             detectorError != null -> detectorError
             !scene.laneDetected && !showCamera -> "Spur nicht erkannt"
             else -> null

@@ -40,12 +40,22 @@ data class VehicleState(
     val railBar: Int? = null,
     val maf: Double? = null,
     val fuelLevel: Int? = null,
+    /** Kraftstoffverbrauch in l/h (PID 5E, nicht jedes Steuergerät) */
+    val fuelRate: Double? = null,
 ) {
     /** Ladedruck relativ zur Umgebung in bar */
     val boostBar: Double?
         get() = mapKpa?.let { ((it - (baroKpa ?: W204Profile.DEFAULT_BARO_KPA)) / 100.0).coerceAtLeast(0.0) }
 
     val engineRunning: Boolean get() = (rpm ?: 0) > 400
+
+    /** l/100 km ab 8 km/h, sonst null */
+    val consumption: Double?
+        get() {
+            val r = fuelRate ?: return null
+            val v = speed ?: return null
+            return if (v >= 8) r / v * 100.0 else null
+        }
 }
 
 enum class ConnState { IDLE, NO_DEVICE, BT_OFF, CONNECTING, INITIALIZING, CONNECTED, IGNITION_OFF, ERROR, DEMO }
@@ -56,6 +66,7 @@ data class ObdStatus(
     val elmVersion: String? = null,
     val supportedPids: Set<Int> = emptySet(),
     val rate: Double = 0.0,
+    val fastMode: Boolean = false,
 ) {
     val live: Boolean get() = state == ConnState.CONNECTED || state == ConnState.DEMO
 }

@@ -14,6 +14,7 @@ class Jarvis(context: Context) : TextToSpeech.OnInitListener {
     @Volatile private var ready = false
     @Volatile var speakEnabled = true
     private val cooldowns = HashMap<String, Long>()
+    @Volatile private var pending = 0
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
@@ -28,6 +29,12 @@ class Jarvis(context: Context) : TextToSpeech.OnInitListener {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
         )
+        tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) { pending = (pending - 1).coerceAtLeast(0) }
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) { pending = (pending - 1).coerceAtLeast(0) }
+        })
         tts.setPitch(0.92f)
         tts.setSpeechRate(1.02f)
     }
@@ -42,7 +49,11 @@ class Jarvis(context: Context) : TextToSpeech.OnInitListener {
             cooldowns[key] = now
         }
         _message.value = text
-        if (speakEnabled && ready) tts.speak(text, TextToSpeech.QUEUE_ADD, null, key ?: "msg$now")
+        if (!speakEnabled || !ready) return
+        // Warnungen sind nur jetzt relevant: wenn schon zwei Ansagen warten, ältere verwerfen
+        val mode = if (pending >= 2) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        pending = if (mode == TextToSpeech.QUEUE_FLUSH) 1 else pending + 1
+        tts.speak(text, mode, null, key ?: "msg$now")
     }
 
     fun shutdown() {
