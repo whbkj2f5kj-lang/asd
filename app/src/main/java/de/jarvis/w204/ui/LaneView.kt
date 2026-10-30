@@ -12,6 +12,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -76,7 +77,7 @@ fun LaneView(
     val laneAlpha by animateFloatAsState(if (scene.laneDetected) 0.95f else 0.35f, tween(400), label = "laneA")
     val measurer = rememberTextMeasurer()
 
-    Canvas(modifier) {
+    Canvas(modifier.clipToBounds()) {
         val cam = ChaseCam(size.width, size.height)
         val zNear = -5f
 

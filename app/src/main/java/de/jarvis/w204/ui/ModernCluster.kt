@@ -82,7 +82,7 @@ fun ModernCluster(
         )
     ) {
         val h = maxHeight
-        val big = (h.value * 0.17f).sp
+        val big = (h.value * 0.15f).sp
         Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier.fillMaxWidth().height(40.dp).padding(start = 14.dp, end = 6.dp),
@@ -98,7 +98,15 @@ fun ModernCluster(
 
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 // ---- links: Geschwindigkeit
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+                    BigValue(
+                        value = v.speed?.toString() ?: "–",
+                        unit = "km/h",
+                        sub = null,
+                        size = big,
+                        alignEnd = false,
+                        modifier = Modifier.weight(0.4f).padding(start = 18.dp, top = h * 0.18f),
+                    )
                     ChevronGauge(
                         value = v.speed?.toFloat(),
                         min = 0f, apexValue = 120f, max = 220f,
@@ -106,23 +114,15 @@ fun ModernCluster(
                         label = { if (it.toInt() in setOf(0, 30, 60, 90, 120, 150, 180, 220)) it.toInt().toString() else null },
                         unit = "km/h",
                         mirrored = false,
-                        modifier = Modifier.fillMaxHeight().fillMaxWidth(0.68f).align(Alignment.CenterEnd),
-                    )
-                    BigValue(
-                        value = v.speed?.toString() ?: "–",
-                        unit = "km/h",
-                        sub = null,
-                        size = big,
-                        alignEnd = false,
-                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 18.dp, top = h * 0.16f),
+                        modifier = Modifier.weight(0.6f).fillMaxHeight(),
                     )
                 }
 
                 // ---- Mitte: Verkehrsassistent
-                Box(Modifier.weight(1.3f).fillMaxHeight(), content = center)
+                Box(Modifier.weight(1.25f).fillMaxHeight().padding(horizontal = 6.dp), content = center)
 
                 // ---- rechts: Drehzahl + Ladedruck
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                     ChevronGauge(
                         value = v.rpm?.toFloat(),
                         min = 0f, apexValue = 2500f, max = W204Profile.RPM_GAUGE_MAX,
@@ -131,7 +131,7 @@ fun ModernCluster(
                         unit = "×1000 U/min",
                         mirrored = true,
                         redFrom = W204Profile.RPM_RED_FROM,
-                        modifier = Modifier.fillMaxHeight().fillMaxWidth(0.68f).align(Alignment.CenterStart),
+                        modifier = Modifier.weight(0.6f).fillMaxHeight(),
                     )
                     BigValue(
                         value = v.boostBar?.let { fmt1(it) } ?: "–",
@@ -139,7 +139,7 @@ fun ModernCluster(
                         sub = v.load?.let { "$it % Last" },
                         size = big,
                         alignEnd = true,
-                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 22.dp, top = h * 0.16f),
+                        modifier = Modifier.weight(0.4f).padding(end = 20.dp, top = h * 0.18f),
                     )
                 }
             }
@@ -159,11 +159,8 @@ private fun BigValue(
     modifier: Modifier,
 ) {
     Column(modifier, horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, color = J.text, fontSize = size, lineHeight = size, fontWeight = FontWeight.Light, maxLines = 1)
-            Spacer(Modifier.width(4.dp))
-            Text(unit, color = J.dim, fontSize = 16.sp, modifier = Modifier.padding(bottom = 10.dp))
-        }
+        Text(value, color = J.text, fontSize = size, lineHeight = size, fontWeight = FontWeight.Light, maxLines = 1, softWrap = false)
+        Text(unit, color = J.dim, fontSize = 16.sp)
         if (sub != null) Text(sub, color = J.dim, fontSize = 13.sp)
     }
 }
