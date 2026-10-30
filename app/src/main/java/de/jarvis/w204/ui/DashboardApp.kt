@@ -164,7 +164,7 @@ private fun TopBar(status: ObdStatus, message: String?, listening: Boolean, onMi
         Text("C 220 CDI", color = J.dim, fontSize = 14.sp)
         Spacer(Modifier.width(18.dp))
         Box(Modifier.weight(1f)) {
-            AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {
+            androidx.compose.animation.AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {
                 Row(
                     Modifier.clip(RoundedCornerShape(50)).background(J.panel2).padding(horizontal = 14.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,

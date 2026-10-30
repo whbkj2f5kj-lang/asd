@@ -29,7 +29,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E "^e: |error:|What went wrong|Could not|> |Caused by" build.log | head -80 > errors.txt || true
+          grep -E "^e: |error:|What went wrong|Could not|^> [^T]|Caused by|^w: " build.log | head -80 > errors.txt || true
           [ -s errors.txt ] || tail -60 build.log > errors.txt
           msg=$(sed -e 's/%/%25/g' errors.txt | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Build-Fehler::$msg"
