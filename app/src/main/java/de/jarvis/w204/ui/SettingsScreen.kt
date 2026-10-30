@@ -3,6 +3,9 @@ package de.jarvis.w204.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -118,6 +121,25 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                                     .clickable { vm.update { it.copy(layout = i) } }
                                     .padding(horizontal = 14.dp, vertical = 8.dp),
                             )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        de.jarvis.w204.ui.Palettes.all.forEachIndexed { i, p ->
+                            val sel = settings.palette == i
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (sel) J.panel2 else J.panel)
+                                    .border(1.dp, if (sel) p.glow else J.track, RoundedCornerShape(50))
+                                    .clickable { vm.update { it.copy(palette = i) } }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.size(12.dp).clip(RoundedCornerShape(50)).background(p.mid))
+                                Spacer(Modifier.width(6.dp))
+                                Text(p.name, color = J.text, fontSize = 14.sp)
+                            }
                         }
                     }
                     Spacer(Modifier.height(12.dp))

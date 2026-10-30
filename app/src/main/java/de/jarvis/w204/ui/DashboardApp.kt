@@ -121,6 +121,9 @@ fun DashboardApp(vm: MainViewModel) {
     val over = currentLimit != null && speed != null && speed > currentLimit + settings.tolerance
 
     val clock = rememberClock()
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalGaugePalette provides Palettes.all[settings.palette.coerceIn(0, Palettes.all.lastIndex)]
+    ) {
     Box(Modifier.fillMaxSize().background(J.bg)) {
         if (settings.layout == 0) {
             ModernCluster(
@@ -174,6 +177,7 @@ fun DashboardApp(vm: MainViewModel) {
         if (showSettings) SettingsScreen(vm, onClose = { showSettings = false })
         val crash by vm.crashReport.collectAsStateWithLifecycle()
         crash?.let { (report, off) -> CrashScreen(report.text, off, onClose = { vm.dismissCrash() }) }
+    }
     }
 }
 

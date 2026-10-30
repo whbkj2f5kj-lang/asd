@@ -17,6 +17,8 @@ data class Settings(
     val cameraSource: Int = 0,
     /** 0 = Modern (Pfeil-Instrumente), 1 = Klassisch (Rundinstrumente) */
     val layout: Int = 0,
+    /** Farbwelt: 0 Kupfer, 1 Eisblau, 2 Sport-Rot, 3 Amber */
+    val palette: Int = 0,
     val cameraIndex: Int = 0,
     val camHeight: Float = 1.25f,
     val camFov: Float = 90f,
@@ -40,6 +42,7 @@ class Prefs(context: Context) {
         cameraEnabled = sp.getBoolean("camOn", true),
         cameraSource = sp.getInt("camSrc", 0),
         layout = sp.getInt("layout", 0),
+        palette = sp.getInt("palette", 0),
         cameraIndex = sp.getInt("cam", 0),
         camHeight = sp.getFloat("camH", 1.25f),
         camFov = sp.getFloat("camFov", 90f),
@@ -59,6 +62,7 @@ class Prefs(context: Context) {
             .putBoolean("camOn", s.cameraEnabled)
             .putInt("camSrc", s.cameraSource)
             .putInt("layout", s.layout)
+            .putInt("palette", s.palette)
             .putInt("cam", s.cameraIndex)
             .putFloat("camH", s.camHeight)
             .putFloat("camFov", s.camFov)

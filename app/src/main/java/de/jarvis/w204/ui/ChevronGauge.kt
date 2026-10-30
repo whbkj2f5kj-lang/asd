@@ -48,6 +48,7 @@ fun ChevronGauge(
     val target = value?.coerceIn(min, max) ?: min
     val animated by animateFloatAsState(target, tween(180), label = "chevron")
     val measurer = rememberTextMeasurer()
+    val pal = LocalGaugePalette.current
 
     Canvas(modifier) {
         val w = size.width
@@ -87,6 +88,24 @@ fun ChevronGauge(
         val yv = if (value == null) botY else yOf(animated)
         val hot = redFrom != null && value != null && value >= redFrom
 
+        // Facetten wie geschliffenes Glas: Dreiecke zwischen Außen- und Innenkante
+        val facets = 14
+        fun facetPaths(): List<Pair<Path, Int>> {
+            val list = ArrayList<Pair<Path, Int>>()
+            for (k in 0 until facets) {
+                val y0 = topY + (botY - topY) * k / facets
+                val y1 = topY + (botY - topY) * (k + 1) / facets
+                val o0 = Offset(mx(outerX(y0)), y0); val i0 = Offset(mx(outerX(y0) + t), y0)
+                val o1 = Offset(mx(outerX(y1)), y1); val i1 = Offset(mx(outerX(y1) + t), y1)
+                list += Path().apply { moveTo(o0.x, o0.y); lineTo(i0.x, i0.y); lineTo(o1.x, o1.y); close() } to (k * 2)
+                list += Path().apply { moveTo(i0.x, i0.y); lineTo(i1.x, i1.y); lineTo(o1.x, o1.y); close() } to (k * 2 + 1)
+            }
+            return list
+        }
+        // fest verteilte Helligkeiten, damit es nicht flimmert
+        val shade = floatArrayOf(0.20f, 0.02f, 0.10f, -0.10f, 0.26f, 0.05f, -0.06f, 0.14f, 0.0f, 0.22f, -0.12f, 0.08f)
+        val allFacets = facetPaths()
+
         // Leerer Teil: dunkel mit feiner Schraffur
         clipRect(bottom = yv) {
             drawPath(band, Copper.empty)
@@ -99,12 +118,41 @@ fun ChevronGauge(
                 }
             }
         }
-        // Gefüllter Teil
+        // Leerer Teil: ganz zarte Glasfacetten
+        clipRect(bottom = yv) {
+            allFacets.forEach { (p, i) ->
+                val a = shade[i % shade.size]
+                if (a > 0.12f) drawPath(p, Color.White.copy(alpha = a * 0.18f))
+            }
+        }
+
+        // Gefüllter Teil: Farbverlauf + Kristallfacetten + Lichtstreifen
         if (value != null && yv < botY) {
             clipRect(top = yv) {
                 val colors = if (hot) listOf(Color(0xFFFFC2B8), J.danger, Color(0xFF7A1E24))
-                else listOf(Copper.light, Copper.mid, Copper.deep)
+                else listOf(pal.light, pal.mid, pal.deep)
                 drawPath(band, Brush.verticalGradient(colors, startY = yv, endY = botY))
+                allFacets.forEach { (p, i) ->
+                    val a = shade[i % shade.size]
+                    drawPath(p, if (a >= 0f) Color.White.copy(alpha = a) else Color.Black.copy(alpha = -a))
+                }
+                // schräger Glanz, wie Licht in Glas
+                clipPath(band) {
+                    drawRect(
+                        Brush.linearGradient(
+                            listOf(Color.Transparent, Color.White.copy(alpha = 0.45f), Color.Transparent),
+                            start = Offset(mx(0f), yv),
+                            end = Offset(mx(w), yv + h * 0.25f),
+                        )
+                    )
+                }
+            }
+            // Leuchten der Füllung nach außen (mehrere weiche Kanten statt Blur – läuft auf Android 10)
+            val glow = if (hot) J.danger else pal.glow
+            clipRect(top = yv) {
+                for (k in 1..3) {
+                    drawPath(outerEdge, glow.copy(alpha = 0.10f / k), style = Stroke(w * 0.02f * k * 2, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                }
             }
         }
 
@@ -132,8 +180,12 @@ fun ChevronGauge(
             }
         }
 
-        // Kanten: außen hell, innen zart
-        drawPath(outerEdge, Color.White.copy(alpha = 0.85f), style = Stroke(w * 0.012f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        // Kanten: außen Glaskante (hell mit Farbstich), innen zart
+        drawPath(
+            outerEdge,
+            Brush.verticalGradient(listOf(Color.White, pal.light, Color.White.copy(alpha = 0.6f)), startY = topY, endY = botY),
+            style = Stroke(w * 0.013f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
         drawPath(innerEdge, Color.White.copy(alpha = 0.18f), style = Stroke(w * 0.006f, join = StrokeJoin.Round))
 
         // Wertmarke: helle Kante mit Leuchten

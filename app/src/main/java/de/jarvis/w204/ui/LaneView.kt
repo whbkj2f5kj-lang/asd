@@ -79,6 +79,7 @@ fun LaneView(
     val laneR by animateFloatAsState(scene.laneRight, tween(300), label = "laneR")
     val laneAlpha by animateFloatAsState(if (scene.laneDetected) 0.95f else 0.35f, tween(400), label = "laneA")
     val measurer = rememberTextMeasurer()
+    val glow = LocalGaugePalette.current.glow
 
     Canvas(
         modifier.clipToBounds().graphicsLayer {
@@ -153,7 +154,7 @@ fun LaneView(
         }
 
         // Eigenes Auto
-        drawVehicle(cam.x(0f, OWN_REAR_Z), cam.y(OWN_REAR_Z), cam.scale(OWN_REAR_Z), ObjKind.CAR, J.ownCar, own = true)
+        drawOwnCar(cam.x(0f, OWN_REAR_Z), cam.y(OWN_REAR_Z), cam.scale(OWN_REAR_Z), glow)
 
         // Frei schwebend: Ränder weich ausblenden (radiert die Ebene zum Rand hin aus)
         if (transparent) {
@@ -197,6 +198,91 @@ private fun DrawScope.drawDashes(cam: ChaseCam, x: Float, phase: Float, alpha: F
 }
 
 private fun Color.darken(f: Float) = Color(red * f, green * f, blue * f, alpha)
+
+/** Eigenes Auto von hinten: schwarzer Lack, Lichtkanten, durchgehendes Rücklicht, Farbschein darunter. */
+private fun DrawScope.drawOwnCar(cx: Float, by: Float, s: Float, glow: Color) {
+    val w = 1.82f * s
+    val h = 1.45f * s
+    val bodyH = h * 0.54f
+    val bodyTop = by - bodyH
+
+    // Farbschein auf der Straße
+    for (k in 3 downTo 1) {
+        drawOval(
+            glow.copy(alpha = 0.07f * (4 - k)),
+            topLeft = Offset(cx - w * (0.55f + 0.12f * k), by - h * (0.05f + 0.02f * k)),
+            size = Size(w * (1.1f + 0.24f * k), h * (0.14f + 0.05f * k)),
+        )
+    }
+    drawOval(Color.Black.copy(alpha = 0.75f), topLeft = Offset(cx - w * 0.56f, by - h * 0.06f), size = Size(w * 1.12f, h * 0.15f))
+
+    // Räder
+    val tyreW = w * 0.16f
+    for (side in listOf(-1f, 1f)) {
+        val x = if (side < 0) cx - w * 0.47f else cx + w * 0.47f - tyreW
+        drawRoundRect(Color(0xFF040506), Offset(x, by - bodyH * 0.18f), Size(tyreW, bodyH * 0.22f), CornerRadius(tyreW * 0.25f))
+    }
+
+    // Dach/Kabine, leicht nach oben verjüngt
+    val cabin = Path().apply {
+        moveTo(cx - w * 0.43f, bodyTop + 2f)
+        cubicTo(cx - w * 0.40f, by - h * 0.80f, cx - w * 0.34f, by - h * 0.97f, cx - w * 0.22f, by - h)
+        lineTo(cx + w * 0.22f, by - h)
+        cubicTo(cx + w * 0.34f, by - h * 0.97f, cx + w * 0.40f, by - h * 0.80f, cx + w * 0.43f, bodyTop + 2f)
+        close()
+    }
+    drawPath(cabin, Brush.verticalGradient(listOf(Color(0xFF2A3139), Color(0xFF0C0F12)), startY = by - h, endY = bodyTop))
+    // Heckscheibe mit Spiegelung
+    val glass = Path().apply {
+        moveTo(cx - w * 0.36f, bodyTop - h * 0.04f)
+        cubicTo(cx - w * 0.33f, by - h * 0.78f, cx - w * 0.28f, by - h * 0.92f, cx - w * 0.19f, by - h * 0.94f)
+        lineTo(cx + w * 0.19f, by - h * 0.94f)
+        cubicTo(cx + w * 0.28f, by - h * 0.92f, cx + w * 0.33f, by - h * 0.78f, cx + w * 0.36f, bodyTop - h * 0.04f)
+        close()
+    }
+    drawPath(glass, Brush.verticalGradient(listOf(Color(0xFF1B232C), Color(0xFF07090B)), startY = by - h, endY = bodyTop))
+    drawPath(
+        glass,
+        Brush.linearGradient(
+            listOf(Color.Transparent, glow.copy(alpha = 0.28f), Color.White.copy(alpha = 0.22f), Color.Transparent),
+            start = Offset(cx - w * 0.36f, by - h * 0.94f),
+            end = Offset(cx + w * 0.10f, bodyTop),
+        ),
+    )
+    // Dachkante
+    drawLine(Color.White.copy(alpha = 0.55f), Offset(cx - w * 0.21f, by - h + 1f), Offset(cx + w * 0.21f, by - h + 1f), strokeWidth = s * 0.025f, cap = StrokeCap.Round)
+
+    // Karosserie: schwarzer Lack mit Glanzverlauf
+    val body = Path().apply {
+        addRoundRect(androidx.compose.ui.geometry.RoundRect(cx - w / 2f, bodyTop, cx + w / 2f, by - bodyH * 0.06f, CornerRadius(w * 0.11f)))
+    }
+    drawPath(body, Brush.verticalGradient(listOf(Color(0xFF3A434D), Color(0xFF171B20), Color(0xFF07080A)), startY = bodyTop, endY = by))
+    // Lichtkanten links/rechts in Farbwelt
+    drawPath(
+        body,
+        Brush.horizontalGradient(
+            listOf(glow.copy(alpha = 0.9f), Color.Transparent, Color.Transparent, glow.copy(alpha = 0.9f)),
+            startX = cx - w / 2f, endX = cx + w / 2f,
+        ),
+        style = Stroke(s * 0.03f),
+    )
+    // Schulterlinie
+    drawLine(Color.White.copy(alpha = 0.35f), Offset(cx - w * 0.44f, bodyTop + bodyH * 0.10f), Offset(cx + w * 0.44f, bodyTop + bodyH * 0.10f), strokeWidth = s * 0.018f, cap = StrokeCap.Round)
+
+    // Durchgehendes Rücklicht mit Leuchten
+    val ty = bodyTop + bodyH * 0.24f
+    val red = Color(0xFFFF2D3A)
+    for (k in 3 downTo 1) {
+        drawLine(red.copy(alpha = 0.12f * (4 - k)), Offset(cx - w * 0.43f, ty), Offset(cx + w * 0.43f, ty), strokeWidth = s * 0.045f * k, cap = StrokeCap.Round)
+    }
+    drawLine(red, Offset(cx - w * 0.44f, ty), Offset(cx + w * 0.44f, ty), strokeWidth = s * 0.03f, cap = StrokeCap.Round)
+    drawLine(Color(0xFFFFB3B8), Offset(cx - w * 0.30f, ty), Offset(cx + w * 0.30f, ty), strokeWidth = s * 0.008f, cap = StrokeCap.Round)
+
+    // Kennzeichenfeld + Diffusor
+    drawRoundRect(Color(0xFF0B0E11), Offset(cx - w * 0.16f, bodyTop + bodyH * 0.42f), Size(w * 0.32f, bodyH * 0.18f), CornerRadius(s * 0.03f))
+    drawRoundRect(Color.White.copy(alpha = 0.10f), Offset(cx - w * 0.16f, bodyTop + bodyH * 0.42f), Size(w * 0.32f, bodyH * 0.18f), CornerRadius(s * 0.03f), style = Stroke(s * 0.01f))
+    drawLine(glow.copy(alpha = 0.5f), Offset(cx - w * 0.30f, by - bodyH * 0.14f), Offset(cx + w * 0.30f, by - bodyH * 0.14f), strokeWidth = s * 0.012f, cap = StrokeCap.Round)
+}
 
 /** Fahrzeug von hinten, (cx, by) = Mitte unten, s = Pixel pro Meter. */
 private fun DrawScope.drawVehicle(cx: Float, by: Float, s: Float, kind: ObjKind, body: Color, own: Boolean = false) {

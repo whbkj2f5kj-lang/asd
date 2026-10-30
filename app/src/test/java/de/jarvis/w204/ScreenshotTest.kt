@@ -18,6 +18,10 @@ import de.jarvis.w204.ui.JarvisTheme
 import de.jarvis.w204.ui.LaneView
 import de.jarvis.w204.ui.ModernCluster
 import de.jarvis.w204.ui.SpeedLimitSign
+import de.jarvis.w204.ui.LocalGaugePalette
+import de.jarvis.w204.ui.Palettes
+import de.jarvis.w204.ui.GaugePalette
+import androidx.compose.runtime.CompositionLocalProvider
 import de.jarvis.w204.vision.ObjKind
 import de.jarvis.w204.vision.Scene
 import de.jarvis.w204.vision.SceneObject
@@ -56,6 +60,29 @@ class ScreenshotTest {
         laneDetected = true,
         leadDistance = 24f,
     )
+
+    private fun cluster(p: GaugePalette) = paparazzi.snapshot {
+        CompositionLocalProvider(LocalGaugePalette provides p) {
+        JarvisTheme {
+            ModernCluster(
+                v = car,
+                status = ObdStatus(ConnState.CONNECTED, "Verbunden", rate = 14.0),
+                message = "Tempolimit 100.",
+                clock = "17:58",
+                listening = false,
+                onMic = {},
+                onSettings = {},
+            ) {
+                LaneView(scene, car.speed, J.accent, Modifier.fillMaxSize(), transparent = true, animate = false)
+                SpeedLimitSign(100, false, Modifier.align(Alignment.TopStart).padding(14.dp).size(62.dp))
+            }
+        }
+        }
+    }
+
+    @Test fun farbeEisblau() = cluster(Palettes.ice)
+    @Test fun farbeRot() = cluster(Palettes.red)
+    @Test fun farbeAmber() = cluster(Palettes.amber)
 
     @Test
     fun modern() = paparazzi.snapshot {
