@@ -10,7 +10,7 @@ import org.junit.Test
 
 class DiagTest {
     @Test fun readOnlyAllowsReading() {
-        listOf("0105", "0902", "1A86", "2130", "21 30", "22F187", "221234").forEach { assertTrue(it, ReadOnly.isAllowed(it)) }
+        listOf("0105", "0904", "1A86", "2130", "21 30", "22F187", "221234").forEach { assertTrue(it, ReadOnly.isAllowed(it)) }
     }
 
     @Test fun readOnlyBlocksEverythingElse() {
