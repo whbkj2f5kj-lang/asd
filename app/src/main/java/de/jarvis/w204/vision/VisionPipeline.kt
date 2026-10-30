@@ -14,6 +14,8 @@ import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 
 /** Ein Kamerabild -> Schilder, Fahrzeuge und Fahrspur in einem Durchgang (~8 Bilder/s). */
 class VisionPipeline(
@@ -38,16 +40,33 @@ class VisionPipeline(
     private var frames = 0
     private var vehicleRuns = 0
 
+    private val _preview = MutableStateFlow<ImageBitmap?>(null)
+    /** Letztes Kamerabild zur Anzeige (Android-Kamera), ca. 15 Bilder/s */
+    val preview: StateFlow<ImageBitmap?> = _preview
+    private var lastPreview = 0L
+
+    fun clearPreview() {
+        _preview.value = null
+    }
+
     /** Android-Kamera (CameraX) */
     override fun analyze(image: ImageProxy) {
         try {
-            if (!due()) return
+            val now = SystemClock.elapsedRealtime()
+            val showPreview = now - lastPreview >= PREVIEW_INTERVAL_MS
+            val analyse = due()
+            if (!showPreview && !analyse) return
             var bmp = image.toBitmap()
-            val rot = image.imageInfo.rotationDegrees
+            // Manche Radios liefern krumme Werte (z. B. 359°) – auf 0/90/180/270 runden
+            val rot = (((image.imageInfo.rotationDegrees + 45) / 90) * 90) % 360
             if (rot != 0) {
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(rot.toFloat()) }, true)
             }
-            guarded(bmp)
+            if (showPreview) {
+                lastPreview = now
+                _preview.value = bmp.asImageBitmap()
+            }
+            if (analyse) guarded(bmp)
         } catch (t: Throwable) {
             Log.w(TAG, "Bildanalyse fehlgeschlagen", t)
         } finally {
@@ -149,5 +168,6 @@ class VisionPipeline(
         private const val TAG = "VisionPipeline"
         private const val SCAN_WIDTH = 320
         private const val MIN_INTERVAL_MS = 110L
+        private const val PREVIEW_INTERVAL_MS = 66L
     }
 }

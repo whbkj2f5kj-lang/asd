@@ -61,6 +61,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     init {
+        // Neue App-Version: Notabschaltungen der alten Version zurücknehmen – der Fehler ist evtl. behoben
+        val sp = app.getSharedPreferences("dashboard_settings", android.content.Context.MODE_PRIVATE)
+        if (sp.getInt("lastVersion", 0) != BuildConfig.VERSION_CODE) {
+            sp.edit().putInt("lastVersion", BuildConfig.VERSION_CODE).apply()
+            val s0 = _settings.value
+            val reset = s0.copy(cameraEnabled = true, objectRecognition = true, signRecognition = true, cameraSource = 0)
+            if (reset != s0) {
+                _settings.value = reset
+                prefs.save(reset)
+            }
+        }
+
         CrashGuard.pending?.let { report ->
             val t = report.text.lowercase()
             val st = report.stages

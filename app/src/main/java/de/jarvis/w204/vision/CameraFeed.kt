@@ -5,18 +5,22 @@ import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
+import android.view.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import de.jarvis.w204.CrashGuard
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -30,25 +34,20 @@ import java.util.concurrent.Executors
 @Composable
 fun CameraFeed(
     cameraIndex: Int,
-    analyzer: ImageAnalysis.Analyzer,
+    vision: VisionPipeline,
     onCameras: (Int) -> Unit,
     onError: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
-    val previewView = remember {
-        PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FIT_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-        }
-    }
+    val frame by vision.preview.collectAsState()
 
     DisposableEffect(cameraIndex, owner) {
         val executor = Executors.newSingleThreadExecutor()
         val future = ProcessCameraProvider.getInstance(context)
         var provider: ProcessCameraProvider? = null
-        var bound: Array<androidx.camera.core.UseCase> = emptyArray()
+        var bound: androidx.camera.core.UseCase? = null
         var disposed = false
 
         future.addListener({
@@ -75,20 +74,21 @@ fun CameraFeed(
                     )
                     .build()
 
-                val preview = Preview.Builder().setResolutionSelector(resolution).build()
-                preview.setSurfaceProvider(previewView.surfaceProvider)
-
+                // Kein CameraX-Preview: manche Radios melden eine Bildschirmdrehung von 359°,
+                // daran stürzt die Vorschau-Ausrichtung ab. Wir zeigen die Analysebilder selbst an
+                // und legen die Drehung fest auf 0°.
                 val analysis = ImageAnalysis.Builder()
                     .setResolutionSelector(resolution)
+                    .setTargetRotation(Surface.ROTATION_0)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .build()
-                analysis.setAnalyzer(executor, analyzer)
+                analysis.setAnalyzer(executor, vision)
 
                 CrashGuard.guard("camera") {
                     p.unbindAll()
-                    p.bindToLifecycle(owner, selector, preview, analysis)
-                    bound = arrayOf(preview, analysis)
+                    p.bindToLifecycle(owner, selector, analysis)
+                    bound = analysis
                 }
                 onError(null)
             } catch (t: Throwable) {
@@ -98,10 +98,15 @@ fun CameraFeed(
 
         onDispose {
             disposed = true
-            if (bound.isNotEmpty()) runCatching { provider?.unbind(*bound) }
+            bound?.let { b -> runCatching { provider?.unbind(b) } }
             executor.shutdown()
+            vision.clearPreview()
         }
     }
 
-    AndroidView(factory = { previewView }, modifier = modifier)
+    Box(modifier, contentAlignment = Alignment.Center) {
+        frame?.let {
+            Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+        }
+    }
 }

@@ -540,7 +540,7 @@ private fun CameraWithOverlay(vm: MainViewModel, modifier: Modifier, showHorizon
         } else {
             CameraFeed(
                 cameraIndex = settings.cameraIndex,
-                analyzer = vm.vision,
+                vision = vm.vision,
                 onCameras = { vm.cameraCount.value = it },
                 onError = { vm.cameraError.value = it },
                 modifier = Modifier.fillMaxSize(),
