@@ -103,7 +103,24 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
                 // ----- Rechts: Jarvis, Kamera, Fahrzeug -----
                 Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                    Section("Jarvis")
+                    Section("Darstellung")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Modern", "Klassisch").forEachIndexed { i, label ->
+                            val sel = settings.layout == i
+                            Text(
+                                label,
+                                color = if (sel) J.bg else J.text,
+                                fontSize = 14.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (sel) J.accent else J.panel2)
+                                    .clickable { vm.update { it.copy(layout = i) } }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Section("Ansagen")
                     SwitchRow("Sprachansagen", settings.voice) { on -> vm.update { it.copy(voice = on) } }
                     SwitchRow("Erkannte Tempolimits ansagen", settings.announceSigns) { on -> vm.update { it.copy(announceSigns = on) } }
                     Spacer(Modifier.height(6.dp))

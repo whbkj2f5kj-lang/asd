@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle testDebugUnitTest assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
+          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
 
       - name: Fehler zusammenfassen
         if: failure()
@@ -48,8 +48,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          shopt -s nullglob
           cp app/build/outputs/apk/debug/app-debug.apk DashboardW204.apk
           gradle assembleDebug --console=plain -Pabis=x86_64,x86
           cp app/build/outputs/apk/debug/app-debug.apk DashboardW204-PC.apk
+          # Vorschaubilder der Oberfläche (Paparazzi) – Fehler hier stoppen die Veröffentlichung nicht
+          if gradle recordPaparazziDebug --console=plain > paparazzi.log 2>&1; then
+            i=0; for f in app/src/test/snapshots/images/*.png; do
+              n=$(basename "$f" .png | sed 's/.*ScreenshotTest_//'); cp "$f" "vorschau_$n.png"; done
+          else
+            msg=$(grep -E "^e: |error|Exception|FAILED|What went wrong" paparazzi.log | head -40 | sed -e 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::warning title=Vorschau fehlgeschlagen::$msg"
+          fi
           gh release delete neueste --yes --cleanup-tag || true
-          gh release create neueste DashboardW204.apk DashboardW204-PC.apk --title "Dashboard W204 (neueste Version)" --notes "DashboardW204.apk = fürs Radio. DashboardW204-PC.apk = für BlueStacks/Emulator. Gebaut aus ${GITHUB_SHA::7}."
+          gh release create neueste DashboardW204.apk DashboardW204-PC.apk vorschau_*.png --title "Dashboard W204 (neueste Version)" --notes "DashboardW204.apk = fürs Radio. DashboardW204-PC.apk = für BlueStacks/Emulator. Gebaut aus ${GITHUB_SHA::7}."

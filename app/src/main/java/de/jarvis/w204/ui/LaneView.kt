@@ -51,10 +51,18 @@ private class ChaseCam(val w: Float, val h: Float) {
  * erkannte Spur, Fahrzeuge in geschätztem Abstand, Leitlinien laufen mit der echten Geschwindigkeit.
  */
 @Composable
-fun LaneView(scene: Scene, speedKmh: Int?, gapColor: Color, modifier: Modifier = Modifier) {
+fun LaneView(
+    scene: Scene,
+    speedKmh: Int?,
+    gapColor: Color,
+    modifier: Modifier = Modifier,
+    transparent: Boolean = false,
+    animate: Boolean = true,
+) {
     val speed by rememberUpdatedState((speedKmh ?: 0) / 3.6f)
     var phase by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(animate) {
+        if (!animate) return@LaunchedEffect
         var last = 0L
         while (true) {
             withFrameNanos { t ->
@@ -72,14 +80,25 @@ fun LaneView(scene: Scene, speedKmh: Int?, gapColor: Color, modifier: Modifier =
         val cam = ChaseCam(size.width, size.height)
         val zNear = -5f
 
-        // Ferner Himmel/Straße: sanfter Verlauf zum Horizont
-        drawRect(
-            Brush.verticalGradient(
-                listOf(J.panel2, J.road),
-                startY = 0f,
-                endY = cam.horizonY + size.height * 0.15f,
+        if (transparent) {
+            // Schwebt frei im Cockpit: nur ein sanfter Lichtschein unter der Straße
+            drawRect(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, J.accent.copy(alpha = 0.05f), Color.Transparent),
+                    startY = cam.horizonY,
+                    endY = size.height,
+                )
             )
-        )
+        } else {
+            // Ferner Himmel/Straße: sanfter Verlauf zum Horizont
+            drawRect(
+                Brush.verticalGradient(
+                    listOf(J.panel2, J.road),
+                    startY = 0f,
+                    endY = cam.horizonY + size.height * 0.15f,
+                )
+            )
+        }
 
         // Eigene Spur leicht blau hinterlegt
         val lanePath = Path().apply {

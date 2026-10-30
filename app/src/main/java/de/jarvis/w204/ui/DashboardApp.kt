@@ -120,8 +120,35 @@ fun DashboardApp(vm: MainViewModel) {
     val speed = vehicle.speed
     val over = currentLimit != null && speed != null && speed > currentLimit + settings.tolerance
 
+    val clock = rememberClock()
     Box(Modifier.fillMaxSize().background(J.bg)) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
+        if (settings.layout == 0) {
+            ModernCluster(
+                v = vehicle,
+                status = status,
+                message = message,
+                clock = clock,
+                listening = listening,
+                onMic = { voice.start() },
+                onSettings = { showSettings = true },
+            ) {
+                ScenePanel(
+                    vm = vm,
+                    scene = scene,
+                    camGranted = camGranted,
+                    cameraBound = !cameraFull,
+                    showCamera = showCamera,
+                    limit = currentLimit,
+                    over = over,
+                    speed = speed,
+                    onToggle = { showCamera = it },
+                    onExpand = { cameraFull = true },
+                    onRequestPermission = { launcher.launch(requiredPermissions()) },
+                    modifier = Modifier.fillMaxSize(),
+                    framed = false,
+                )
+            }
+        } else Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
             TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true })
             Spacer(Modifier.height(10.dp))
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -220,7 +247,7 @@ private fun TopBar(status: ObdStatus, message: String?, listening: Boolean, onMi
 }
 
 @Composable
-private fun StatusChip(s: ObdStatus, onClick: () -> Unit) {
+internal fun StatusChip(s: ObdStatus, onClick: () -> Unit) {
     val (color, label) = when (s.state) {
         ConnState.CONNECTED -> J.ok to "OBD"
         ConnState.DEMO -> J.accent to "Demo"
@@ -255,7 +282,7 @@ private fun Clock() {
 }
 
 @Composable
-private fun MicButton(listening: Boolean, onClick: () -> Unit) {
+internal fun MicButton(listening: Boolean, onClick: () -> Unit) {
     val bg = if (listening) J.accent else J.panel2
     val fg = if (listening) Color.Black else J.text
     Box(
@@ -383,7 +410,7 @@ private fun Divider() {
     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(1.dp).background(J.hairline))
 }
 
-private fun coolantColor(c: Int?): Color? = when {
+internal fun coolantColor(c: Int?): Color? = when {
     c == null -> null
     c < W204Profile.COOLANT_COLD -> J.cold
     c >= W204Profile.COOLANT_HOT -> J.danger
@@ -391,7 +418,7 @@ private fun coolantColor(c: Int?): Color? = when {
     else -> J.ok
 }
 
-private fun voltColor(v: Double?, running: Boolean): Color? = when {
+internal fun voltColor(v: Double?, running: Boolean): Color? = when {
     v == null -> null
     running && (v < W204Profile.CHARGE_LOW || v > W204Profile.CHARGE_HIGH) -> J.warn
     !running && v < W204Profile.BATTERY_LOW -> J.warn
@@ -414,6 +441,7 @@ private fun ScenePanel(
     onExpand: () -> Unit,
     onRequestPermission: () -> Unit,
     modifier: Modifier,
+    framed: Boolean = true,
 ) {
     val detectorError by vm.vision.detectorError.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -426,13 +454,13 @@ private fun ScenePanel(
         else -> J.accent
     }
 
-    Box(modifier.panel()) {
+    Box(if (framed) modifier.panel() else modifier.clip(RoundedCornerShape(24.dp))) {
         // Kamera läuft immer (für die Erkennung), die Spuransicht liegt darüber
         if (camGranted && cameraBound && settings.cameraEnabled) {
             CameraWithOverlay(vm, Modifier.fillMaxSize(), showHorizon = false, onClick = { if (showCamera) onExpand() })
         }
         if (!showCamera) {
-            LaneView(scene, speed, gapColor, Modifier.fillMaxSize())
+            LaneView(scene, speed, gapColor, Modifier.fillMaxSize(), transparent = !framed)
         }
 
         SpeedLimitSign(limit, over, Modifier.align(Alignment.TopStart).padding(14.dp).size(62.dp).clickable { vm.clearLimit() })
