@@ -13,8 +13,8 @@ android {
         applicationId = "de.jarvis.w204"
         minSdk = 29          // Android 10 (Head-Unit)
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.9"
+        versionCode = 11
+        versionName = "2.0"
         // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
         val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         ndk { abiFilters += abis }
@@ -79,6 +79,9 @@ dependencies {
 
     // Eigener USB-Kameratreiber (UVC), falls das Radio USB-Kameras nicht an Android weitergibt
     implementation("com.herohan:UVCAndroid:1.0.13")
+
+    // USB-Seriell (Reifendruck-Empfänger mit CH340/FTDI)
+    implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
 
     testImplementation("junit:junit:4.13.2")
 }

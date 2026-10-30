@@ -3,6 +3,7 @@ package de.jarvis.w204.ui
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -77,6 +78,9 @@ fun ModernCluster(
     faults: Int = 0,
     faultSeverity: Int = 0,
     onDiagnose: () -> Unit = {},
+    tireText: String? = null,
+    tireLevel: Int = -1,
+    onTires: () -> Unit = {},
     center: @Composable BoxScope.() -> Unit,
 ) {
     BoxWithConstraints(
@@ -149,7 +153,7 @@ fun ModernCluster(
                 }
             }
 
-            StatusBar(v, message, clock)
+            StatusBar(v, message, clock, tireText, tireLevel, onTires)
         }
     }
 }
@@ -176,7 +180,7 @@ private fun BigValue(
 }
 
 @Composable
-private fun StatusBar(v: VehicleState, message: String?, clock: String) {
+private fun StatusBar(v: VehicleState, message: String?, clock: String, tireText: String?, tireLevel: Int, onTires: () -> Unit) {
     var showMessage by remember { mutableStateOf(false) }
     LaunchedEffect(message) {
         if (message != null) {
@@ -186,12 +190,12 @@ private fun StatusBar(v: VehicleState, message: String?, clock: String) {
         }
     }
     Row(
-        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 24.dp),
+        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Stat(v.voltage?.let { fmt1(it) }, "V", voltColor(v.voltage, v.engineRunning))
         Spacer(Modifier.width(28.dp))
-        Text(clock, color = J.text, fontSize = 20.sp, fontWeight = FontWeight.Light)
+        Text(clock, color = J.text, fontSize = 26.sp, fontWeight = FontWeight.Light)
 
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             androidx.compose.animation.AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {
@@ -201,13 +205,35 @@ private fun StatusBar(v: VehicleState, message: String?, clock: String) {
                 ) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(J.accent))
                     Spacer(Modifier.width(8.dp))
-                    Text(message ?: "", color = J.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(message ?: "", color = J.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(26.dp), verticalAlignment = Alignment.CenterVertically) {
-            v.consumption?.let { Stat(fmt1(it), "l/100", J.accent, label = "Verbrauch") }
+            if (tireText != null) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(50)).background(J.panel2)
+                        .clickable(onClick = onTires).padding(horizontal = 12.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(if (tireLevel < 0) J.track else tireColor(tireLevel)))
+                    Spacer(Modifier.width(7.dp))
+                    Text(tireText, color = if (tireLevel > 0) tireColor(tireLevel) else J.text, fontSize = 20.sp)
+                }
+            }
+            if ((v.exhaustTemp ?: 0) >= 480 && v.engineRunning) {
+                Text(
+                    "DPF regeneriert",
+                    color = Color.Black,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(J.warn).padding(horizontal = 12.dp, vertical = 5.dp),
+                )
+            }
+            v.consumption?.let { Stat((if (v.fuelEstimated) "≈" else "") + fmt1(it), "l/100", J.accent, label = "Verbrauch") }
+            v.fuelLevel?.let { Stat(it.toString(), "%", if (it < 12) J.warn else null, label = "Tank") }
+            v.exhaustTemp?.let { Stat(it.toString(), "°C", if (it >= 480) J.warn else null, label = "Abgas") }
             Stat(v.coolant?.toString(), "°C", coolantColor(v.coolant), label = "Motor")
             Stat(v.ambient?.let { (if (it > 0) "+" else "") + it }, "°C", null, label = "Außen")
         }
@@ -222,11 +248,11 @@ private fun Stat(value: String?, unit: String, dot: Color?, label: String? = nul
             Spacer(Modifier.width(7.dp))
         }
         if (label != null) {
-            Text(label, color = J.dim, fontSize = 13.sp)
+            Text(label, color = J.dim, fontSize = 16.sp)
             Spacer(Modifier.width(6.dp))
         }
-        Text(value ?: "–", color = if (value == null) J.dim else J.text, fontSize = 20.sp, fontWeight = FontWeight.Light)
+        Text(value ?: "–", color = if (value == null) J.dim else J.text, fontSize = 26.sp, fontWeight = FontWeight.Light)
         Spacer(Modifier.width(3.dp))
-        Text(unit, color = J.dim, fontSize = 13.sp)
+        Text(unit, color = J.dim, fontSize = 16.sp)
     }
 }

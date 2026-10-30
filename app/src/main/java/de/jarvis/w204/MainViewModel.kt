@@ -28,6 +28,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val obd = ObdManager(app, viewModelScope)
     val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
+    val tpms = de.jarvis.w204.tpms.TpmsManager(app, viewModelScope)
+
+    /** 0 = ok/keine Daten, 1 = Druck niedrig/Batterie, 2 = Luftverlust */
+    fun tireLevel(t: de.jarvis.w204.tpms.TireState, s: Settings): Int {
+        if (t.noSignal) return 0
+        if (t.leak) return 2
+        val soll = if (t.wheel.front) s.sollFront else s.sollRear
+        if (t.wheel != de.jarvis.w204.tpms.Wheel.SPARE && t.bar < soll - s.tpmsDelta) return if (t.bar < soll - 2 * s.tpmsDelta) 2 else 1
+        if (t.tempC >= 85) return 1
+        return 0
+    }
 
     data class DiagState(
         val busy: Boolean = false,
@@ -66,7 +77,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return head + urgent
     }
     val jarvis = Jarvis(app)
+    val regenActive get() = brainRef.regenActive
     private val brain = JarvisBrain(jarvis)
+    private val brainRef get() = brain
 
     private val _speedLimit = MutableStateFlow<Int?>(null)
     val speedLimit: StateFlow<Int?> = _speedLimit
@@ -137,6 +150,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             crashReport.value = report to off
         }
         applyRuntime(_settings.value)
+        if (_settings.value.tpms) tpms.start()
+
+        // Reifendruck-Warnungen
+        viewModelScope.launch {
+            combine(tpms.tires, _settings) { tires, s -> tires to s }.collect { (tires, s) ->
+                for (t in tires.values) {
+                    if (t.wheel == de.jarvis.w204.tpms.Wheel.SPARE || t.noSignal) continue
+                    val bar = String.format(java.util.Locale.GERMANY, "%.1f", t.bar)
+                    when {
+                        t.leak -> jarvis.say("Achtung: Druckverlust ${t.wheel.label}! Bitte sicher anhalten und Reifen prüfen.", "leak_${t.wheel}", 60_000)
+                        tireLevel(t, s) == 2 -> jarvis.say("Reifendruck ${t.wheel.label} sehr niedrig: $bar bar. Bitte bald anhalten und prüfen.", "low2_${t.wheel}", 120_000)
+                        tireLevel(t, s) == 1 && t.tempC < 85 -> jarvis.say("Reifendruck ${t.wheel.label} niedrig: $bar bar.", "low_${t.wheel}", 15 * 60_000)
+                        t.tempC >= 85 -> jarvis.say("Reifen ${t.wheel.label} ist sehr warm: ${t.tempC} Grad.", "hot_${t.wheel}", 15 * 60_000)
+                    }
+                    if (t.lowBattery) jarvis.say("Sensorbatterie ${t.wheel.label} ist schwach.", "batt_${t.wheel}", 24 * 3600_000L)
+                }
+            }
+        }
 
         viewModelScope.launch {
             while (true) {
@@ -197,6 +228,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applyRuntime(s: Settings) {
+        tpms.setEnabled(s.tpms)
         jarvis.speakEnabled = s.voice
         vision.signsEnabled = s.signRecognition
         vision.objectsEnabled = s.objectRecognition
@@ -206,6 +238,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onVoiceQuery(text: String) {
         val q = text.lowercase(java.util.Locale.GERMAN)
+        if (listOf("reifen", "luftdruck", "reifendruck").any { it in q }) {
+            val t = tpms.tires.value.values.filter { it.wheel != de.jarvis.w204.tpms.Wheel.SPARE && !it.noSignal }
+            if (t.isEmpty()) { jarvis.say("Ich habe noch keine Reifendaten."); return }
+            val s = _settings.value
+            val bad = t.filter { tireLevel(it, s) > 0 }
+            val f = { x: Double -> String.format(java.util.Locale.GERMANY, "%.1f", x) }
+            jarvis.say(
+                if (bad.isEmpty()) "Alle Reifen in Ordnung. " + t.joinToString(", ") { "${it.wheel.short.lowercase()} ${f(it.bar)}" } + " bar."
+                else bad.joinToString(" ") { "${it.wheel.label}: ${f(it.bar)} bar." } + " Bitte prüfen."
+            )
+            return
+        }
         if (listOf("fehler", "diagnose", "fehlerspeicher", "kontrollleuchte", "motorleuchte").any { it in q }) {
             jarvis.say(faultSummary(diag.value.result))
             return
@@ -214,6 +258,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        tpms.release()
         obd.stop()
         jarvis.shutdown()
         vision.close()

@@ -17,6 +17,10 @@ class JarvisBrain(private val jarvis: Jarvis) {
     private var lowChargeSince = 0L
     private var gapSince = 0L
     private var lastGreetAt = 0L
+    private var hotSince = 0L
+    private var coolSince = 0L
+    var regenActive = false
+        private set
 
     fun onSessionStart() {
         // Kurzer Abriss (Funkloch, Adapter-Neustart) ist keine neue Fahrt
@@ -74,6 +78,28 @@ class JarvisBrain(private val jarvis: Jarvis) {
             overSince = 0L
         }
 
+        // DPF-Regeneration: Abgas vor dem Filter dauerhaft sehr heiß (normal < ~400 °C, Regeneration ~550–650 °C)
+        val ex = s.exhaustTemp
+        if (ex != null && s.engineRunning) {
+            if (ex >= 480) {
+                coolSince = 0L
+                if (hotSince == 0L) hotSince = now
+                if (!regenActive && now - hotSince > 90_000) {
+                    regenActive = true
+                    jarvis.say("Der Partikelfilter regeneriert gerade. Wenn möglich weiterfahren und den Motor nicht abstellen.", "regen", 20 * 60_000)
+                }
+            } else if (ex < 400) {
+                hotSince = 0L
+                if (regenActive) {
+                    if (coolSince == 0L) coolSince = now
+                    if (now - coolSince > 60_000) {
+                        regenActive = false
+                        jarvis.say("Regeneration des Partikelfilters ist abgeschlossen.", "regen_end", 10 * 60_000)
+                    }
+                }
+            }
+        }
+
         // Abstand: deutlich unter "halber Tacho" bei über 50 km/h
         if (leadDistance != null && speed != null && speed >= 50 && leadDistance < speed / 2f * 0.6f) {
             if (gapSince == 0L) gapSince = now
@@ -124,6 +150,14 @@ class JarvisBrain(private val jarvis: Jarvis) {
                 limit?.let { "Zuletzt erkannt: Tempolimit $it." } ?: "Ich habe noch kein Tempolimit erkannt."
             has("abstand", "vordermann", "vorne", "vor mir") ->
                 leadDistance?.let { "Etwa ${it.toInt()} Meter Abstand zum Vordermann." } ?: "Vor dir erkenne ich gerade kein Fahrzeug."
+            has("partikelfilter", "dpf", "regeneration", "abgas") ->
+                when {
+                    regenActive -> "Der Partikelfilter regeneriert gerade. Abgas vor dem Filter: ${s.exhaustTemp} Grad."
+                    s.exhaustTemp != null -> "Keine Regeneration aktiv. Abgas vor dem Filter: ${s.exhaustTemp} Grad."
+                    else -> "Die Abgastemperatur ist gerade nicht verfügbar."
+                }
+            has("tank", "reichweite") ->
+                s.fuelLevel?.let { "Der Tank ist zu $it Prozent voll." } ?: "Den Tankfüllstand liefert dein Steuergerät gerade nicht."
             has("verbrauch", "verbrauche", "sprit", "diesel") ->
                 s.consumption?.let { "Aktuell ${fmt1(it)} Liter auf 100 Kilometer." }
                     ?: s.fuelRate?.let { "Aktuell ${fmt1(it)} Liter pro Stunde." }

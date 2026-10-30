@@ -66,4 +66,16 @@ class ObdParserTest {
         assertEquals(14.1, ObdParser.voltage("14,1V")!!, 0.001)
         assertNull(ObdParser.voltage("?"))
     }
+
+    @Test fun exhaustTemp() =
+        assertEquals(568, parse(Pid.EXHAUST, "413E17C0").exhaustTemp)   // 0x17C0 = 6080 -> 608 °C - 40
+
+    @Test fun lambdaAndEstimatedFuel() {
+        // λ = 0x8000*2/65536 = 1.0 ; MAF 30 g/s -> 30/(1*14.5)*3600/832 ≈ 8.95 l/h
+        val s = parse(Pid.LAMBDA, "41248000FFFF").copy(maf = 30.0, speed = 100)
+        assertEquals(1.0, s.lambda!!, 0.001)
+        assertEquals(8.95, s.fuelRateEff!!, 0.05)
+        assertTrue(s.fuelEstimated)
+        assertEquals(8.95, s.consumption!!, 0.05)
+    }
 }

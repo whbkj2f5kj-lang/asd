@@ -53,6 +53,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     val camCount by vm.cameraCount.collectAsStateWithLifecycle()
     val usbCams by vm.usbCameraNames.collectAsStateWithLifecycle()
     val usbAll by vm.usbAll.collectAsStateWithLifecycle()
+    val tpmsStatus by vm.tpms.status.collectAsStateWithLifecycle()
     var devices by remember { mutableStateOf(bondedDevices(context)) }
 
     Surface(Modifier.fillMaxSize(), color = J.bg) {
@@ -240,6 +241,31 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Spacer(Modifier.height(6.dp))
                     Hint("Erkennt runde Tempolimit-Schilder (10–130). Nur als Hinweis – es gilt immer die echte Beschilderung.")
 
+                    Spacer(Modifier.height(12.dp))
+                    Section("Reifendruck (TPMS)")
+                    SwitchRow("USB-Empfänger verwenden", settings.tpms) { on -> vm.update { it.copy(tpms = on) } }
+                    Hint(tpmsStatus.message + (tpmsStatus.device?.let { " · $it" } ?: "") +
+                        (if (tpmsStatus.genuine == false) " · Kennung abweichend" else ""))
+                    Hint("Wichtig: Die alte TPMS-App darf nicht gleichzeitig laufen – sonst ist der Empfänger belegt.")
+                    Text("Solldruck vorn: ${fmtBar(settings.sollFront)} bar", color = J.text, fontSize = 15.sp)
+                    Slider(
+                        value = settings.sollFront,
+                        onValueChange = { f -> vm.update { it.copy(sollFront = (f * 10).roundToInt() / 10f) } },
+                        valueRange = 1.8f..3.4f,
+                    )
+                    Text("Solldruck hinten: ${fmtBar(settings.sollRear)} bar", color = J.text, fontSize = 15.sp)
+                    Slider(
+                        value = settings.sollRear,
+                        onValueChange = { f -> vm.update { it.copy(sollRear = (f * 10).roundToInt() / 10f) } },
+                        valueRange = 1.8f..3.4f,
+                    )
+                    Text("Warnung ab ${fmtBar(settings.tpmsDelta)} bar unter Soll", color = J.text, fontSize = 15.sp)
+                    Slider(
+                        value = settings.tpmsDelta,
+                        onValueChange = { f -> vm.update { it.copy(tpmsDelta = (f * 10).roundToInt() / 10f) } },
+                        valueRange = 0.1f..0.6f,
+                    )
+                    Hint("Solldruck steht auf dem Aufkleber im Tankdeckel (für normale Beladung).")
                     Spacer(Modifier.height(12.dp))
                     Section("Kamera einmessen")
                     Text("Einbauhöhe: ${String.format(Locale.GERMANY, "%.2f", settings.camHeight)} m", color = J.text, fontSize = 15.sp)

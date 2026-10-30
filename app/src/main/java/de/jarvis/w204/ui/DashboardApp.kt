@@ -100,6 +100,9 @@ fun DashboardApp(vm: MainViewModel) {
     val message by vm.jarvis.message.collectAsStateWithLifecycle()
 
     var showDiagnose by remember { mutableStateOf(false) }
+    var showTires by remember { mutableStateOf(false) }
+    val tires by vm.tpms.tires.collectAsStateWithLifecycle()
+    val tpmsStatus by vm.tpms.status.collectAsStateWithLifecycle()
     val diag by vm.diag.collectAsStateWithLifecycle()
     val faultCodes = diag.result?.codes?.distinctBy { it.code }.orEmpty()
     val faults = faultCodes.size
@@ -142,6 +145,10 @@ fun DashboardApp(vm: MainViewModel) {
                 faults = faults,
                 faultSeverity = faultSeverity,
                 onDiagnose = { showDiagnose = true },
+                tireText = if (settings.tpms && (tires.isNotEmpty() || tpmsStatus.link == de.jarvis.w204.tpms.TpmsLink.CONNECTED))
+                    tireSummary(vm, tires, settings).first else null,
+                tireLevel = tireSummary(vm, tires, settings).second,
+                onTires = { showTires = true },
             ) {
                 ScenePanel(
                     vm = vm,
@@ -185,6 +192,7 @@ fun DashboardApp(vm: MainViewModel) {
         if (cameraFull) FullscreenCamera(vm, camGranted, currentLimit, over, onClose = { cameraFull = false })
         if (showSettings) SettingsScreen(vm, onClose = { showSettings = false })
         if (showDiagnose) DiagnoseScreen(vm, onClose = { showDiagnose = false })
+        if (showTires) TireScreen(vm, onClose = { showTires = false })
         val crash by vm.crashReport.collectAsStateWithLifecycle()
         crash?.let { (report, off) -> CrashScreen(report.text, off, onClose = { vm.dismissCrash() }) }
     }

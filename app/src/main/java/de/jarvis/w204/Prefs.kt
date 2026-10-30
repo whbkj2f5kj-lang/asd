@@ -19,6 +19,10 @@ data class Settings(
     val layout: Int = 0,
     /** Farbwelt: 0 Kupfer, 1 Eisblau, 2 Sport-Rot, 3 Amber */
     val palette: Int = 0,
+    val tpms: Boolean = true,
+    val sollFront: Float = 2.4f,
+    val sollRear: Float = 2.6f,
+    val tpmsDelta: Float = 0.3f,
     val cameraIndex: Int = 0,
     val camHeight: Float = 1.25f,
     val camFov: Float = 90f,
@@ -43,6 +47,10 @@ class Prefs(context: Context) {
         cameraSource = sp.getInt("camSrc", 0),
         layout = sp.getInt("layout", 0),
         palette = sp.getInt("palette", 0),
+        tpms = sp.getBoolean("tpms", true),
+        sollFront = sp.getFloat("sollF", 2.4f),
+        sollRear = sp.getFloat("sollR", 2.6f),
+        tpmsDelta = sp.getFloat("tpmsD", 0.3f),
         cameraIndex = sp.getInt("cam", 0),
         camHeight = sp.getFloat("camH", 1.25f),
         camFov = sp.getFloat("camFov", 90f),
@@ -63,6 +71,10 @@ class Prefs(context: Context) {
             .putInt("camSrc", s.cameraSource)
             .putInt("layout", s.layout)
             .putInt("palette", s.palette)
+            .putBoolean("tpms", s.tpms)
+            .putFloat("sollF", s.sollFront)
+            .putFloat("sollR", s.sollRear)
+            .putFloat("tpmsD", s.tpmsDelta)
             .putInt("cam", s.cameraIndex)
             .putFloat("camH", s.camHeight)
             .putFloat("camFov", s.camFov)

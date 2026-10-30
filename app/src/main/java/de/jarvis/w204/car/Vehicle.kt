@@ -42,6 +42,10 @@ data class VehicleState(
     val fuelLevel: Int? = null,
     /** Kraftstoffverbrauch in l/h (PID 5E, nicht jedes Steuergerät) */
     val fuelRate: Double? = null,
+    /** Lambda (Luftverhältnis) aus PID 24 */
+    val lambda: Double? = null,
+    /** Abgastemperatur vor dem Partikelfilter (PID 3E) */
+    val exhaustTemp: Int? = null,
 ) {
     /** Ladedruck relativ zur Umgebung in bar */
     val boostBar: Double?
@@ -49,10 +53,25 @@ data class VehicleState(
 
     val engineRunning: Boolean get() = (rpm ?: 0) > 400
 
+    /**
+     * Verbrauch in l/h: direkt (PID 5E) oder geschätzt aus Luftmasse und Lambda:
+     * Diesel-Masse = Luft / (λ · 14,5), Dichte 0,832 kg/l.
+     */
+    val fuelRateEff: Double?
+        get() {
+            fuelRate?.let { return it }
+            val m = maf ?: return null
+            val l = lambda ?: return null
+            if (l < 0.9 || l > 8.0) return null
+            return m / (l * 14.5) * 3600.0 / 832.0
+        }
+
+    val fuelEstimated: Boolean get() = fuelRate == null && fuelRateEff != null
+
     /** l/100 km ab 8 km/h, sonst null */
     val consumption: Double?
         get() {
-            val r = fuelRate ?: return null
+            val r = fuelRateEff ?: return null
             val v = speed ?: return null
             return if (v >= 8) r / v * 100.0 else null
         }

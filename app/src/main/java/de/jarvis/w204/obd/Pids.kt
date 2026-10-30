@@ -14,6 +14,8 @@ enum class Pid(val code: Int, val bytes: Int) {
     RAIL(0x23, 2),
     FUEL(0x2F, 1),
     FUEL_RATE(0x5E, 2),
+    LAMBDA(0x24, 4),
+    EXHAUST(0x3E, 2),
     MAP_EXT(0x87, 5),
     BARO(0x33, 1),
     AMBIENT(0x46, 1);
@@ -74,6 +76,9 @@ object ObdParser {
             else -> s
         }
         Pid.FUEL_RATE -> s.copy(fuelRate = (d[0] * 256 + d[1]) / 20.0)
+        Pid.LAMBDA -> s.copy(lambda = (d[0] * 256 + d[1]) * 2.0 / 65536.0)
+        // Katalysatortemperatur Bank 1 Sensor 2 = Abgas nach dem Oxi-Kat, direkt vor dem Partikelfilter
+        Pid.EXHAUST -> s.copy(exhaustTemp = (d[0] * 256 + d[1]) / 10 - 40)
         Pid.RPM -> s.copy(rpm = (d[0] * 256 + d[1]) / 4)
         Pid.SPEED -> s.copy(speed = d[0])
         Pid.IAT -> s.copy(intakeTemp = d[0] - 40)
