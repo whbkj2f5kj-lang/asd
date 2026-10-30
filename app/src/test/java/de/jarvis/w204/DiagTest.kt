@@ -15,7 +15,7 @@ class DiagTest {
 
     @Test fun readOnlyBlocksEverythingElse() {
         // Fehler löschen, Sitzung, Freischaltung, Codieren, Routinen, Stellglieder, Reset, Schreiben
-        listOf("04", "14FFFFFF", "1003", "1092", "2701", "2EF1901234", "3101FF00", "2F123403", "1101", "3B9012", "3001", "ATZ", "", "2", "22F18").forEach {
+        listOf("04", "14FFFFFF", "1001", "1002", "1003", "1085", "1092", "2701", "2EF1901234", "3101FF00", "2F123403", "1101", "3B9012", "3001", "ATZ", "", "2", "22F18").forEach {
             assertFalse(it, ReadOnly.isAllowed(it))
         }
     }

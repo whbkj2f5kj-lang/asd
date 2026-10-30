@@ -77,6 +77,19 @@ class SafeElm internal constructor(private val e: Elm327) {
         return e.send(cmd, timeoutMs)
     }
 
+    /**
+     * Einzige erlaubte Sitzungsumschaltung, fest verdrahtet: 10 03 = erweiterte Diagnosesitzung
+     * (mehr Messwerte lesbar), 10 01 = zurück zur Standard-Sitzung. Die Programmier-Sitzung (10 02)
+     * und alle anderen sind über diesen Weg nicht erreichbar, request() sperrt Dienst 10 komplett.
+     * Liefert true, wenn das Steuergerät zugestimmt hat (Antwort 50 03 / 50 01).
+     */
+    fun session(extended: Boolean): Boolean {
+        val cmd = if (extended) "1003" else "1001"
+        val raw = e.send(cmd, 1500)
+        val rep = DiagParser.parse(raw, 0x10)
+        return rep is DiagParser.Reply.Positive && rep.hex.startsWith(if (extended) "5003" else "5001")
+    }
+
     internal fun restore() {
         if (header != null && header != "7DF") {
             runCatching { e.send("ATCRA") }
@@ -162,7 +175,7 @@ object DiagParser {
 // Scanner
 // ------------------------------------------------------------------------------------------
 
-data class Hit(val ecu: String, val header: String, val service: Int, val id: Int, val data: String) {
+data class Hit(val ecu: String, val header: String, val service: Int, val id: Int, val data: String, val ext: Boolean = false) {
     val command: String get() = if (service == 0x21) "21%02X".format(id) else "22%04X".format(id)
     val key: String get() = "$header:$command"
 }
@@ -196,6 +209,29 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
     private var job: Job? = null
     private var recJob: Job? = null
 
+    /** Wann zuletzt pro Steuergerät in der erweiterten Sitzung angefragt wurde (sie endet nach ~5 s Ruhe). */
+    private val extAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Vor Anfragen in der erweiterten Sitzung: nach Pause neu betreten. false = Steuergerät lehnt ab. */
+    private fun ensureExtended(e: SafeElm, header: String): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - (extAt[header] ?: 0L) < 2500) { extAt[header] = now; return true }
+        e.target(header)
+        val ok = e.session(true)
+        if (ok) extAt[header] = now else extAt.remove(header)
+        return ok
+    }
+
+    /** Am Ende immer zurück in die Standard-Sitzung (spätestens Zündung aus macht das auch). */
+    private suspend fun leaveExtended() {
+        val headers = extAt.keys.toList()
+        extAt.clear()
+        if (headers.isEmpty()) return
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            runCatching { obd.withAdapter { e -> headers.forEach { h -> e.target(h); runCatching { e.session(false) } } } }
+        }
+    }
+
     init {
         load()
     }
@@ -208,8 +244,8 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
         runCatching {
             hitsFile().takeIf { it.exists() }?.readLines()?.forEach { line ->
                 val p = line.split(';')
-                if (p.size == 5) {
-                    val h = Hit(p[0], p[1], p[2].toInt(16), p[3].toInt(16), p[4])
+                if (p.size == 5 || p.size == 6) {
+                    val h = Hit(p[0], p[1], p[2].toInt(16), p[3].toInt(16), p[4], ext = p.getOrNull(5) == "E")
                     if (!(h.service == 0x22 && h.id in ReadOnly.privateDids)) hits[h.key] = h
                 }
             }
@@ -220,7 +256,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
 
     private fun save() {
         runCatching {
-            hitsFile().writeText(hits.values.joinToString("\n") { "${it.ecu};${it.header};%02X;%X;${it.data}".format(it.service, it.id) })
+            hitsFile().writeText(hits.values.joinToString("\n") { "${it.ecu};${it.header};%02X;%X;${it.data};${if (it.ext) "E" else ""}".format(it.service, it.id) })
         }
         prefs.edit().putString("idents", idents.joinToString("\n")).apply()
     }
@@ -290,22 +326,41 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
 
     // ---------- 2) Werte suchen
 
-    /** [full] = alle 65.536 UDS-Kennungen pro Steuergerät (dauert, kann angehalten und fortgesetzt werden). */
-    fun scan(full: Boolean) = run(if (full) "Komplett-Scan läuft …" else "Schnell-Scan läuft …") {
-        // Komplett: wahrscheinlichste Messwert-Bereiche zuerst, Kenndaten (F1xx) hat der Schnell-Scan schon
+    enum class Mode { QUICK, STANDARD, DEEP }
+
+    /**
+     * QUICK = nur Gerätedaten (F1xx) + KWP-Messwerte, STANDARD = alle 65.536 Kennungen in der
+     * Standard-Sitzung, DEEP = alle Kennungen in der erweiterten Diagnosesitzung (findet die meisten Messwerte).
+     * STANDARD und DEEP lassen sich anhalten und fortsetzen.
+     */
+    fun scan(mode: Mode) = run(when (mode) {
+        Mode.QUICK -> "Schnell-Scan läuft …"
+        Mode.STANDARD -> "Standard-Scan läuft …"
+        Mode.DEEP -> "Tiefen-Scan läuft (erweiterte Sitzung) …"
+    }) {
+        try { scanTasks(mode) } finally { leaveExtended() }
+    }
+
+    private suspend fun scanTasks(mode: Mode) {
+        val deep = mode == Mode.DEEP
+        // wahrscheinlichste Messwert-Bereiche zuerst, Kenndaten (F1xx) hat der Schnell-Scan schon
         val fullRanges = listOf(0x1000..0x3FFF, 0x0000..0x0FFF, 0x4000..0xEFFF, 0xF200..0xFFFF, 0xF000..0xF0FF)
+        val rejected = mutableSetOf<String>()
         val tasks = buildList {
             for (ecu in ecus) {
-                add(Task(ecu, 0x21, 0x00..0xFF, resumable = false))
-                if (full) fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) }
-                else add(Task(ecu, 0x22, 0xF100..0xF1FF, resumable = false))
+                when (mode) {
+                    Mode.QUICK -> { add(Task(ecu, 0x21, 0x00..0xFF, resumable = false)); add(Task(ecu, 0x22, 0xF100..0xF1FF, resumable = false)) }
+                    Mode.STANDARD -> { add(Task(ecu, 0x21, 0x00..0xFF, resumable = false)); fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) } }
+                    Mode.DEEP -> fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) }
+                }
             }
         }
         val total = tasks.sumOf { it.range.count() }.toFloat()
         var done = 0
 
         for (t in tasks) {
-            val resumeKey = "next_${t.ecu.header}_%02X_%04X".format(t.service, t.range.first)
+            val resumeKey = (if (deep) "ext_" else "next_") + "${t.ecu.header}_%02X_%04X".format(t.service, t.range.first)
+            if (t.ecu.header in rejected) { done += t.range.count(); continue }
             var id = if (t.resumable) prefs.getInt(resumeKey, t.range.first).coerceIn(t.range.first, t.range.last + 1) else t.range.first
             done += id - t.range.first
             var notSupported = 0
@@ -316,12 +371,21 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 currentCoroutineContext().ensureActive()
                 val end = min(id + 7, t.range.last)
                 val first = id
+                var refused = false
                 val replies = adapter { e ->
+                    if (deep && !ensureExtended(e, t.ecu.header)) { refused = true; return@adapter emptyList() }
                     e.target(t.ecu.header)
                     (first..end).filter { !(t.service == 0x22 && it in ReadOnly.privateDids) }.map { i ->
                         val cmd = if (t.service == 0x21) "21%02X".format(i) else "22%04X".format(i)
                         i to DiagParser.parse(e.request(cmd, 1000), t.service)
                     }
+                }
+                if (refused) {
+                    // Steuergerät erlaubt die erweiterte Sitzung nicht (z. B. Fahrzeug fährt) -> Rest überspringen
+                    rejected += t.ecu.header
+                    _state.update { it.copy(phase = "${t.ecu.name}: erweiterte Sitzung abgelehnt – im Stand mit laufendem Motor erneut versuchen") }
+                    done += t.range.last - id + 1
+                    break
                 }
                 for ((i, rep) in replies) {
                     asked++
@@ -329,8 +393,10 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                         is DiagParser.Reply.Positive -> {
                             answered = true
                             notSupported = 0
-                            val h = Hit(t.ecu.name, t.ecu.header, t.service, i, rep.hex)
-                            hits[h.key] = h
+                            val h = Hit(t.ecu.name, t.ecu.header, t.service, i, rep.hex, ext = deep)
+                            // in der Standard-Sitzung schon lesbar -> so markiert lassen (einfacher abzufragen)
+                            val old = hits[h.key]
+                            hits[h.key] = if (old != null && !old.ext) h.copy(ext = false) else h
                         }
                         is DiagParser.Reply.Negative -> {
                             answered = true
@@ -366,7 +432,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
         // Kenndaten (F1xx) ändern sich nie – nur mögliche Live-Werte aufzeichnen
         val list = hits.values.filter { !(it.service == 0x22 && it.id in 0xF100..0xF1FF) }
         if (list.isEmpty()) {
-            _state.update { it.copy(phase = "Noch keine Live-Werte gefunden – bitte erst den Komplett-Scan laufen lassen") }
+            _state.update { it.copy(phase = "Noch keine Live-Werte gefunden – bitte erst den Tiefen-Scan laufen lassen") }
             return
         }
         rowHeader = (listOf("zeit", "drehzahl", "kmh", "kuehlmittel_c", "aussen_c", "last_pct", "saugrohr_kpa", "spannung_v") +
@@ -380,6 +446,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                     for (chunk in list.chunked(6)) {
                         val part = adapter { e ->
                             chunk.map { h ->
+                                if (h.ext && !ensureExtended(e, h.header)) return@map h.key to ""
                                 e.target(h.header)
                                 val rep = DiagParser.parse(e.request(h.command, 1000), h.service)
                                 h.key to ((rep as? DiagParser.Reply.Positive)?.hex ?: "")
@@ -400,7 +467,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 }
                 delay(15_000)
             }
-        }
+        }.also { j -> j.invokeOnCompletion { scope.launch(Dispatchers.IO) { leaveExtended() } } }
     }
 
     // ---------- 4) Export nach Download/W204 (für USB-Stick)
@@ -413,9 +480,9 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 appendLine("# Dashboard W204 – Steuergeräte-Scan (nur gelesen), App ${BuildConfig.VERSION_NAME}, ${SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMANY).format(now)}")
                 appendLine("# Kennungen")
                 idents.forEach { appendLine(it) }
-                appendLine("# Treffer: steuergeraet;adresse;anfrage;antwort")
+                appendLine("# Treffer: steuergeraet;adresse;anfrage;antwort;sitzung")
                 hits.values.filter { !(it.service == 0x22 && it.id in ReadOnly.privateDids) }
-                    .forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data}") }
+                    .forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data};${if (it.ext) "erweitert" else "standard"}") }
                 if (rows.isNotEmpty()) {
                     appendLine("# Aufzeichnung")
                     appendLine(rowHeader)

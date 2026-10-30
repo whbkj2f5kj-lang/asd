@@ -108,7 +108,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
                     Spacer(Modifier.height(12.dp))
                     Section("Steuergeräte-Scan (nur lesen)")
-                    Hint("Sucht Mercedes-spezifische Werte (DPF, Öltemperatur, Getriebe …) in Motor- und Getriebesteuergerät. Es wird ausschließlich gelesen – nichts gelöscht oder verändert. Zündung an bzw. Motor im Stand laufen lassen.")
+                    Hint("Sucht Mercedes-spezifische Werte (DPF, Öltemperatur, Getriebe …) in Motor- und Getriebesteuergerät. Es wird ausschließlich gelesen – nichts gelöscht, codiert oder verändert. Die Programmier-Sitzung ist fest gesperrt.")
                     Text(scan.phase, color = J.text, fontSize = 14.sp, modifier = Modifier.padding(vertical = 4.dp))
                     if (scan.busy) {
                         androidx.compose.material3.LinearProgressIndicator(
@@ -118,11 +118,27 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     }
                     Hint("Gefundene Werte: ${scan.hits}" + if (scan.snapshots > 0) " · Messpunkte: ${scan.snapshots}" else "")
                     scan.idents.forEach { Hint("• $it") }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { vm.scanner.identify() }, enabled = !scan.busy) { Text("1. Erkennen") }
-                        TextButton(onClick = { vm.scanner.scan(full = false) }, enabled = !scan.busy) { Text("2. Schnell-Scan") }
-                        TextButton(onClick = { vm.scanner.scan(full = true) }, enabled = !scan.busy) { Text("Komplett") }
-                    }
+                    TextButton(onClick = { vm.scanner.identify() }, enabled = !scan.busy) { Text("1. Steuergeräte erkennen") }
+                    Text("2. Scan wählen", color = J.text, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
+                    ScanOption(
+                        title = "Tiefen-Scan",
+                        badge = "EMPFOHLEN",
+                        text = "Erweiterte Diagnosesitzung wie in der Werkstatt – hier geben Mercedes-Steuergeräte ihre Messwerte frei (DPF, Öl, Getriebe). Weiterhin nur lesen. Im Stand mit laufendem Motor, Wählhebel P. Dauert lange, kann angehalten und fortgesetzt werden.",
+                        enabled = !scan.busy,
+                        highlight = true,
+                    ) { vm.scanner.scan(de.jarvis.w204.obd.EcuScanner.Mode.DEEP) }
+                    ScanOption(
+                        title = "Standard-Scan",
+                        badge = null,
+                        text = "Alle Nummern, aber nur in der normalen Sitzung. Findet bei deinem Motor bisher nur Gerätedaten.",
+                        enabled = !scan.busy,
+                    ) { vm.scanner.scan(de.jarvis.w204.obd.EcuScanner.Mode.STANDARD) }
+                    ScanOption(
+                        title = "Schnell-Scan",
+                        badge = null,
+                        text = "Nur Gerätedaten (Teilenummer, Software). Ca. 1 Minute.",
+                        enabled = !scan.busy,
+                    ) { vm.scanner.scan(de.jarvis.w204.obd.EcuScanner.Mode.QUICK) }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (scan.busy) TextButton(onClick = { vm.scanner.stop() }) { Text("Anhalten") }
                         TextButton(onClick = { vm.scanner.toggleRecording() }) {
@@ -312,6 +328,31 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ScanOption(title: String, badge: String?, text: String, enabled: Boolean, highlight: Boolean = false, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(10.dp))
+            .background(if (highlight) J.accent.copy(alpha = 0.14f) else J.panel2)
+            .then(if (highlight) Modifier.border(1.dp, J.accent, RoundedCornerShape(10.dp)) else Modifier)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, color = if (enabled) J.text else J.dim, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (badge != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    badge, color = androidx.compose.ui.graphics.Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(J.accent).padding(horizontal = 6.dp, vertical = 1.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text("Starten ›", color = if (enabled) J.accent else J.dim, fontSize = 14.sp)
+        }
+        Text(text, color = J.dim, fontSize = 13.sp)
     }
 }
 
