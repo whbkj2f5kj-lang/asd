@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle assembleDebug --console=plain 2>&1 | tee build.log
+          gradle assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
 
       - name: Fehler zusammenfassen
         if: failure()

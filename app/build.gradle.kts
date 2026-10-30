@@ -14,8 +14,8 @@ android {
         targetSdk = 34
         versionCode = 2
         versionName = "0.1.1"
-        // Nur ARM (Head-Units); manche Radios laufen trotz 64-Bit-Chip mit 32-Bit-Android
-        val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a")
+        // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
+        val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         ndk { abiFilters += abis }
     }
 
