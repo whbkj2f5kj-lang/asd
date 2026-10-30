@@ -49,5 +49,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk DashboardW204.apk
+          gradle assembleDebug --console=plain -Pabis=x86_64,x86
+          cp app/build/outputs/apk/debug/app-debug.apk DashboardW204-PC.apk
           gh release delete neueste --yes --cleanup-tag || true
-          gh release create neueste DashboardW204.apk --title "Dashboard W204 (neueste Version)" --notes "Automatisch gebaut aus ${GITHUB_SHA::7}."
+          gh release create neueste DashboardW204.apk DashboardW204-PC.apk --title "Dashboard W204 (neueste Version)" --notes "DashboardW204.apk = fürs Radio. DashboardW204-PC.apk = für BlueStacks/Emulator. Gebaut aus ${GITHUB_SHA::7}."
