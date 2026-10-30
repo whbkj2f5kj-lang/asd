@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -38,3 +41,13 @@ jobs:
         with:
           name: DashboardW204-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Als Download veröffentlichen
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk DashboardW204.apk
+          gh release delete neueste --yes --cleanup-tag || true
+          gh release create neueste DashboardW204.apk --title "Dashboard W204 (neueste Version)" --notes "Automatisch gebaut aus ${GITHUB_SHA::7}."
