@@ -13,6 +13,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -77,7 +80,12 @@ fun LaneView(
     val laneAlpha by animateFloatAsState(if (scene.laneDetected) 0.95f else 0.35f, tween(400), label = "laneA")
     val measurer = rememberTextMeasurer()
 
-    Canvas(modifier.clipToBounds()) {
+    Canvas(
+        modifier.clipToBounds().graphicsLayer {
+            // Eigene Ebene, damit die Ränder echt transparent ausblenden können
+            if (transparent) compositingStrategy = CompositingStrategy.Offscreen
+        }
+    ) {
         val cam = ChaseCam(size.width, size.height)
         val zNear = -5f
 
@@ -144,16 +152,26 @@ fun LaneView(
             }
         }
 
-        // Frei schwebend: Straße läuft nach unten weich aus
-        if (transparent) {
-            drawRect(
-                Brush.verticalGradient(listOf(Color.Transparent, J.bg), startY = size.height * 0.80f, endY = size.height),
-                topLeft = Offset(0f, size.height * 0.80f),
-            )
-        }
-
         // Eigenes Auto
         drawVehicle(cam.x(0f, OWN_REAR_Z), cam.y(OWN_REAR_Z), cam.scale(OWN_REAR_Z), ObjKind.CAR, J.ownCar, own = true)
+
+        // Frei schwebend: Ränder weich ausblenden (radiert die Ebene zum Rand hin aus)
+        if (transparent) {
+            val w = size.width
+            val h = size.height
+            drawRect(
+                Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = h * 0.90f, endY = h),
+                blendMode = BlendMode.DstOut,
+            )
+            drawRect(
+                Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = 0f, endX = w * 0.14f),
+                blendMode = BlendMode.DstOut,
+            )
+            drawRect(
+                Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = w * 0.86f, endX = w),
+                blendMode = BlendMode.DstOut,
+            )
+        }
     }
 }
 
