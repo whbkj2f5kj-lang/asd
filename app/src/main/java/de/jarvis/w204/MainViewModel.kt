@@ -27,6 +27,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings: StateFlow<Settings> = _settings
 
     val obd = ObdManager(app, viewModelScope)
+    val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
     val jarvis = Jarvis(app)
     private val brain = JarvisBrain(jarvis)
 

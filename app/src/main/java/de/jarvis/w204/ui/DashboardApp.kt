@@ -224,7 +224,7 @@ private fun TopBar(status: ObdStatus, message: String?, listening: Boolean, onMi
     Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Dashboard", color = J.text, fontSize = 19.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.width(10.dp))
-        Text("C 220 CDI", color = J.dim, fontSize = 14.sp)
+        Text("C 200 CDI", color = J.dim, fontSize = 14.sp)
         Spacer(Modifier.width(18.dp))
         Box(Modifier.weight(1f)) {
             androidx.compose.animation.AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {

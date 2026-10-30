@@ -1,0 +1,420 @@
+package de.jarvis.w204.obd
+
+import android.content.ContentValues
+import android.content.Context
+import android.os.Environment
+import android.provider.MediaStore
+import de.jarvis.w204.BuildConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.min
+
+// ------------------------------------------------------------------------------------------
+// Sicherheit: Es verlassen ausschließlich LESENDE Diagnoseanfragen die App.
+// ------------------------------------------------------------------------------------------
+
+class ReadOnlyViolation(cmd: String) : IllegalArgumentException("Blockiert – nur Lesen erlaubt: $cmd")
+
+object ReadOnly {
+    /**
+     * 01/09 = OBD-Messwerte/Fahrzeuginfo lesen, 1A = KWP-Kennung lesen,
+     * 21 = KWP-Messwert lesen, 22 = UDS-Datenkennung lesen.
+     * Alles andere (Fehler löschen 04/14, Codieren 2E/3B, Routinen 31, Stellglieder 2F/30,
+     * Sitzungen 10, Freischaltung 27, Reset 11 …) ist gesperrt.
+     */
+    private val allowed = setOf("01", "09", "1A", "21", "22")
+
+    fun isAllowed(cmd: String): Boolean {
+        val c = cmd.uppercase().replace(" ", "")
+        if (c.length < 2 || c.length > 8 || c.length % 2 != 0) return false
+        if (!c.all { it in "0123456789ABCDEF" }) return false
+        return c.substring(0, 2) in allowed
+    }
+}
+
+/** Zugriff auf den Adapter, der nur Leseanfragen und die Zieladresse (7E0–7E7) erlaubt. */
+class SafeElm internal constructor(private val e: Elm327) {
+    private var header: String? = null
+
+    fun target(h: String) {
+        require(h.matches(Regex("7E[0-7]|7DF"))) { "Unerlaubte Adresse $h" }
+        if (h != header) {
+            e.send("ATSH$h")
+            header = h
+        }
+    }
+
+    fun request(cmd: String, timeoutMs: Long = 1500): String {
+        if (!ReadOnly.isAllowed(cmd)) throw ReadOnlyViolation(cmd)
+        return e.send(cmd, timeoutMs)
+    }
+
+    internal fun restore() {
+        if (header != null && header != "7DF") runCatching { e.send("ATSH7DF") }
+        header = null
+    }
+}
+
+// ------------------------------------------------------------------------------------------
+// Antworten auswerten (auch mehrteilige ISO-TP-Antworten im ELM-Format "014 / 0:.. / 1:..")
+// ------------------------------------------------------------------------------------------
+
+object DiagParser {
+    sealed interface Reply {
+        data class Positive(val hex: String) : Reply
+        data class Negative(val nrc: Int) : Reply
+        data object None : Reply
+    }
+
+    private fun Char.isHex() = this in '0'..'9' || this in 'A'..'F'
+    private val frameLine = Regex("^([0-9A-F]):([0-9A-F]*)$")
+
+    fun messages(raw: String): List<String> {
+        val lines = raw.uppercase().replace("SEARCHING...", "")
+            .split('\r', '\n').map { it.replace(" ", "").trim() }.filter { it.isNotEmpty() }
+        val out = mutableListOf<String>()
+        var expect = -1
+        val sb = StringBuilder()
+        for (l in lines) {
+            if (expect < 0 && l.length == 3 && l.all { it.isHex() }) {
+                expect = l.toInt(16) * 2
+                sb.clear()
+                continue
+            }
+            val m = frameLine.find(l)
+            if (expect >= 0 && m != null) {
+                sb.append(m.groupValues[2])
+                if (sb.length >= expect) {
+                    out += sb.substring(0, expect)
+                    expect = -1
+                }
+                continue
+            }
+            if (expect >= 0) {
+                if (sb.isNotEmpty()) out += sb.toString()
+                expect = -1
+            }
+            if (l.all { it.isHex() } && l.length % 2 == 0) out += l
+        }
+        if (expect >= 0 && sb.isNotEmpty()) out += sb.toString()
+        return out
+    }
+
+    fun parse(raw: String, sid: Int): Reply {
+        val pos = "%02X".format(sid + 0x40)
+        val neg = "7F%02X".format(sid)
+        var negative: Reply? = null
+        for (m in messages(raw)) {
+            if (m.startsWith(pos)) return Reply.Positive(m)
+            if (m.startsWith(neg) && m.length >= 6) {
+                val nrc = m.substring(4, 6).toInt(16)
+                if (nrc != 0x78) negative = Reply.Negative(nrc)   // 78 = "bitte warten", kein Endergebnis
+            }
+        }
+        return negative ?: Reply.None
+    }
+
+    /** Lesbarer Text aus einer Antwort (für Teilenummern, Softwarestände). */
+    fun ascii(hex: String, skip: Int): String {
+        val sb = StringBuilder()
+        var i = skip * 2
+        while (i + 1 < hex.length) {
+            val c = hex.substring(i, i + 2).toInt(16)
+            if (c in 0x20..0x7E) sb.append(c.toChar())
+            i += 2
+        }
+        return sb.toString().trim()
+    }
+}
+
+// ------------------------------------------------------------------------------------------
+// Scanner
+// ------------------------------------------------------------------------------------------
+
+data class Hit(val ecu: String, val header: String, val service: Int, val id: Int, val data: String) {
+    val command: String get() = if (service == 0x21) "21%02X".format(id) else "22%04X".format(id)
+    val key: String get() = "$header:$command"
+}
+
+data class ScanState(
+    val busy: Boolean = false,
+    val phase: String = "Bereit",
+    val progress: Float = 0f,
+    val idents: List<String> = emptyList(),
+    val hits: Int = 0,
+    val recording: Boolean = false,
+    val snapshots: Int = 0,
+    val lastFile: String? = null,
+)
+
+class EcuScanner(private val context: Context, private val obd: ObdManager, private val scope: CoroutineScope) {
+
+    private data class Ecu(val name: String, val header: String)
+    private data class Task(val ecu: Ecu, val service: Int, val range: IntRange, val resumable: Boolean)
+
+    private val ecus = listOf(Ecu("Motor", "7E0"), Ecu("Getriebe", "7E1"))
+    private val prefs = context.getSharedPreferences("ecu_scan", Context.MODE_PRIVATE)
+    private val hits = LinkedHashMap<String, Hit>()
+    private val idents = mutableListOf<String>()
+    private val rows = mutableListOf<String>()
+    private var rowHeader = ""
+
+    private val _state = MutableStateFlow(ScanState())
+    val state: StateFlow<ScanState> = _state
+
+    private var job: Job? = null
+    private var recJob: Job? = null
+
+    init {
+        load()
+    }
+
+    // ---------- Speicher (damit ein Scan fortgesetzt werden kann)
+
+    private fun hitsFile() = File(context.filesDir, "scan_hits.csv")
+
+    private fun load() {
+        runCatching {
+            hitsFile().takeIf { it.exists() }?.readLines()?.forEach { line ->
+                val p = line.split(';')
+                if (p.size == 5) {
+                    val h = Hit(p[0], p[1], p[2].toInt(16), p[3].toInt(16), p[4])
+                    hits[h.key] = h
+                }
+            }
+        }
+        idents += prefs.getString("idents", "").orEmpty().split('\n').filter { it.isNotBlank() }
+        _state.update { it.copy(hits = hits.size, idents = idents.toList()) }
+    }
+
+    private fun save() {
+        runCatching {
+            hitsFile().writeText(hits.values.joinToString("\n") { "${it.ecu};${it.header};%02X;%X;${it.data}".format(it.service, it.id) })
+        }
+        prefs.edit().putString("idents", idents.joinToString("\n")).apply()
+    }
+
+    fun reset() {
+        if (job?.isActive == true || recJob?.isActive == true) return
+        hits.clear()
+        idents.clear()
+        rows.clear()
+        prefs.edit().clear().apply()
+        hitsFile().delete()
+        _state.value = ScanState(phase = "Zurückgesetzt")
+    }
+
+    // ---------- Ablaufsteuerung
+
+    private suspend fun <T> adapter(block: (SafeElm) -> T): T =
+        obd.withAdapter(block) ?: throw IOException("Keine Verbindung zum Auto – Zündung an und OBD verbunden?")
+
+    private fun run(phase: String, block: suspend () -> Unit) {
+        if (job?.isActive == true) return
+        job = scope.launch(Dispatchers.IO) {
+            _state.update { it.copy(busy = true, phase = phase, progress = 0f) }
+            try {
+                block()
+                _state.update { it.copy(phase = "Fertig – ${hits.size} Werte gefunden") }
+            } catch (c: CancellationException) {
+                _state.update { it.copy(phase = "Angehalten – kann fortgesetzt werden") }
+                throw c
+            } catch (t: Throwable) {
+                _state.update { it.copy(phase = "Abgebrochen: ${t.message}") }
+            } finally {
+                save()
+                _state.update { it.copy(busy = false, hits = hits.size) }
+            }
+        }
+    }
+
+    fun stop() {
+        job?.cancel()
+    }
+
+    // ---------- 1) Steuergeräte erkennen (ohne FIN / Seriennummer)
+
+    fun identify() = run("Steuergeräte werden erkannt …") {
+        val found = mutableListOf<String>()
+        // KWP: 1A86/1A87 = Mercedes-Teilenummer, Software, Lieferant. UDS: F187 Teilenummer, F189 Software, F191 Hardware, F18A Lieferant.
+        // Bewusst NICHT: 1A90/22F190 (FIN), 22F18C (Seriennummer).
+        val requests = listOf("1A86" to 2, "1A87" to 2, "22F187" to 3, "22F189" to 3, "22F191" to 3, "22F18A" to 3)
+        for ((i, ecu) in ecus.withIndex()) {
+            var any = false
+            for ((cmd, skip) in requests) {
+                val raw = adapter { e -> e.target(ecu.header); e.request(cmd) }
+                val rep = DiagParser.parse(raw, cmd.substring(0, 2).toInt(16))
+                if (rep is DiagParser.Reply.Positive) {
+                    any = true
+                    found += "${ecu.name} $cmd: ${DiagParser.ascii(rep.hex, skip).ifBlank { "–" }}  [${rep.hex.take(60)}]"
+                }
+            }
+            if (!any) found += "${ecu.name} (${ecu.header}): keine Kennung erhalten"
+            _state.update { it.copy(progress = (i + 1f) / ecus.size) }
+        }
+        idents.clear()
+        idents += found
+        _state.update { it.copy(idents = found.toList()) }
+    }
+
+    // ---------- 2) Werte suchen
+
+    /** [full] = alle 65.536 UDS-Kennungen pro Steuergerät (dauert, kann angehalten und fortgesetzt werden). */
+    fun scan(full: Boolean) = run(if (full) "Komplett-Scan läuft …" else "Schnell-Scan läuft …") {
+        val tasks = buildList {
+            for (ecu in ecus) {
+                add(Task(ecu, 0x21, 0x00..0xFF, resumable = false))
+                if (full) add(Task(ecu, 0x22, 0x0000..0xFFFF, resumable = true))
+                else add(Task(ecu, 0x22, 0xF100..0xF1FF, resumable = false))
+            }
+        }
+        val total = tasks.sumOf { it.range.count() }.toFloat()
+        var done = 0
+
+        for (t in tasks) {
+            val resumeKey = "next_${t.ecu.header}_%02X".format(t.service)
+            var id = if (t.resumable) prefs.getInt(resumeKey, t.range.first).coerceIn(t.range.first, t.range.last + 1) else t.range.first
+            done += id - t.range.first
+            var notSupported = 0
+            var answered = false
+            var asked = 0
+
+            while (id <= t.range.last) {
+                currentCoroutineContext().ensureActive()
+                val end = min(id + 24, t.range.last)
+                val first = id
+                val replies = adapter { e ->
+                    e.target(t.ecu.header)
+                    (first..end).map { i ->
+                        val cmd = if (t.service == 0x21) "21%02X".format(i) else "22%04X".format(i)
+                        i to DiagParser.parse(e.request(cmd, 1000), t.service)
+                    }
+                }
+                for ((i, rep) in replies) {
+                    asked++
+                    when (rep) {
+                        is DiagParser.Reply.Positive -> {
+                            answered = true
+                            notSupported = 0
+                            val h = Hit(t.ecu.name, t.ecu.header, t.service, i, rep.hex)
+                            hits[h.key] = h
+                        }
+                        is DiagParser.Reply.Negative -> {
+                            answered = true
+                            if (rep.nrc == 0x11) notSupported++ else notSupported = 0   // 11 = Dienst unbekannt
+                        }
+                        DiagParser.Reply.None -> {}
+                    }
+                }
+                done += end - first + 1
+                id = end + 1
+                if (t.resumable) prefs.edit().putInt(resumeKey, id).apply()
+                _state.update { it.copy(progress = done / total, hits = hits.size, phase = "${t.ecu.name}: Dienst %02X · %d gefunden".format(t.service, hits.size)) }
+
+                // Dienst kennt das Steuergerät nicht oder es schweigt komplett -> Rest überspringen
+                if (notSupported >= 10 || (!answered && asked >= 50)) {
+                    done += t.range.last - id + 1
+                    if (t.resumable) prefs.edit().putInt(resumeKey, t.range.last + 1).apply()
+                    break
+                }
+                if (hits.size % 10 == 0) save()
+            }
+        }
+    }
+
+    // ---------- 3) Aufzeichnung während der Fahrt (alle 15 s alle gefundenen Werte)
+
+    fun toggleRecording() {
+        if (recJob?.isActive == true) {
+            recJob?.cancel()
+            _state.update { it.copy(recording = false, phase = "Aufzeichnung beendet – ${rows.size} Messpunkte") }
+            return
+        }
+        val list = hits.values.toList()
+        if (list.isEmpty()) {
+            _state.update { it.copy(phase = "Erst scannen – noch keine Werte gefunden") }
+            return
+        }
+        rowHeader = (listOf("zeit", "drehzahl", "kmh", "kuehlmittel_c", "aussen_c", "last_pct", "saugrohr_kpa", "spannung_v") +
+            list.map { it.key }).joinToString(";")
+        recJob = scope.launch(Dispatchers.IO) {
+            _state.update { it.copy(recording = true, phase = "Aufzeichnung läuft") }
+            val fmt = SimpleDateFormat("HH:mm:ss", Locale.GERMANY)
+            while (currentCoroutineContext().isActive) {
+                val values = HashMap<String, String>()
+                try {
+                    for (chunk in list.chunked(15)) {
+                        val part = adapter { e ->
+                            chunk.map { h ->
+                                e.target(h.header)
+                                val rep = DiagParser.parse(e.request(h.command, 1000), h.service)
+                                h.key to ((rep as? DiagParser.Reply.Positive)?.hex ?: "")
+                            }
+                        }
+                        values.putAll(part)
+                    }
+                    val v = obd.vehicle.value
+                    val base = listOf(
+                        fmt.format(Date()), v.rpm, v.speed, v.coolant, v.ambient, v.load, v.mapKpa, v.voltage,
+                    ).map { it?.toString() ?: "" }
+                    rows += (base + list.map { values[it.key].orEmpty() }).joinToString(";")
+                    _state.update { it.copy(snapshots = rows.size) }
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (t: Throwable) {
+                    _state.update { it.copy(phase = "Aufzeichnung wartet: ${t.message}") }
+                }
+                delay(15_000)
+            }
+        }
+    }
+
+    // ---------- 4) Export nach Download/W204 (für USB-Stick)
+
+    fun export() = scope.launch(Dispatchers.IO) {
+        try {
+            val now = Date()
+            val name = "W204-Scan-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.GERMANY).format(now) + ".csv"
+            val text = buildString {
+                appendLine("# Dashboard W204 – Steuergeräte-Scan (nur gelesen), App ${BuildConfig.VERSION_NAME}, ${SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMANY).format(now)}")
+                appendLine("# Kennungen")
+                idents.forEach { appendLine(it) }
+                appendLine("# Treffer: steuergeraet;adresse;anfrage;antwort")
+                hits.values.forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data}") }
+                if (rows.isNotEmpty()) {
+                    appendLine("# Aufzeichnung")
+                    appendLine(rowHeader)
+                    rows.forEach { appendLine(it) }
+                }
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.MIME_TYPE, "text/csv")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/W204")
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IOException("Datei konnte nicht angelegt werden")
+            resolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                ?: throw IOException("Datei konnte nicht geschrieben werden")
+            _state.update { it.copy(lastFile = "Download/W204/$name", phase = "Exportiert: Download/W204/$name") }
+        } catch (t: Throwable) {
+            _state.update { it.copy(phase = "Export fehlgeschlagen: ${t.message}") }
+        }
+    }
+}

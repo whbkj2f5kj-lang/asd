@@ -49,6 +49,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     val context = LocalContext.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     val status by vm.obd.status.collectAsStateWithLifecycle()
+    val scan by vm.scanner.state.collectAsStateWithLifecycle()
     val camCount by vm.cameraCount.collectAsStateWithLifecycle()
     val usbCams by vm.usbCameraNames.collectAsStateWithLifecycle()
     val usbAll by vm.usbAll.collectAsStateWithLifecycle()
@@ -102,6 +103,35 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Hint("Abfragerate: ${String.format(Locale.GERMANY, "%.1f", status.rate)} Werte/s" + if (status.fastMode) " · Schnellmodus" else "")
                     if (status.supportedPids.isNotEmpty()) {
                         Hint("Vom Steuergerät gemeldete PIDs: " + status.supportedPids.sorted().joinToString(" ") { "%02X".format(it) })
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Section("Steuergeräte-Scan (nur lesen)")
+                    Hint("Sucht Mercedes-spezifische Werte (DPF, Öltemperatur, Getriebe …) in Motor- und Getriebesteuergerät. Es wird ausschließlich gelesen – nichts gelöscht oder verändert. Zündung an bzw. Motor im Stand laufen lassen.")
+                    Text(scan.phase, color = J.text, fontSize = 14.sp, modifier = Modifier.padding(vertical = 4.dp))
+                    if (scan.busy) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { scan.progress },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        )
+                    }
+                    Hint("Gefundene Werte: ${scan.hits}" + if (scan.snapshots > 0) " · Messpunkte: ${scan.snapshots}" else "")
+                    scan.idents.forEach { Hint("• $it") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { vm.scanner.identify() }, enabled = !scan.busy) { Text("1. Erkennen") }
+                        TextButton(onClick = { vm.scanner.scan(full = false) }, enabled = !scan.busy) { Text("2. Schnell-Scan") }
+                        TextButton(onClick = { vm.scanner.scan(full = true) }, enabled = !scan.busy) { Text("Komplett") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (scan.busy) TextButton(onClick = { vm.scanner.stop() }) { Text("Anhalten") }
+                        TextButton(onClick = { vm.scanner.toggleRecording() }) {
+                            Text(if (scan.recording) "Aufzeichnung stoppen" else "3. Fahrt aufzeichnen")
+                        }
+                        TextButton(onClick = { vm.scanner.export() }) { Text("4. Exportieren") }
+                    }
+                    scan.lastFile?.let { Hint("Gespeichert: $it – mit Dateimanager auf USB-Stick kopieren.") }
+                    TextButton(onClick = { vm.scanner.reset() }, enabled = !scan.busy && !scan.recording) {
+                        Text("Scan-Daten löschen", color = J.dim)
                     }
                 }
 
@@ -228,7 +258,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
                     Spacer(Modifier.height(12.dp))
                     Section("Fahrzeug")
-                    Hint("Mercedes-Benz W204 C 220 CDI · OM651\nDiagnose: ISO 15765-4 CAN, 11 Bit, 500 kBaud")
+                    Hint("Mercedes-Benz W204 C 200 CDI (2010, Automatik) · OM651\nDiagnose: ISO 15765-4 CAN, 11 Bit, 500 kBaud")
                     Hint("App-Version ${de.jarvis.w204.BuildConfig.VERSION_NAME}")
                 }
             }

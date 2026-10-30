@@ -3,11 +3,11 @@ package de.jarvis.w204.car
 import java.util.Locale
 
 /**
- * Fahrzeugprofil: Mercedes-Benz W204 C 220 CDI, Motor OM651 (2,1 l, Biturbo-Diesel).
+ * Fahrzeugprofil: Mercedes-Benz W204 C 200 CDI (2010, Automatik), Motor OM651 (2,1 l Turbodiesel).
  * Alle Schwellen für Anzeigen und Jarvis-Warnungen stehen hier an einer Stelle.
  */
 object W204Profile {
-    const val TITLE = "W204 · C 220 CDI"
+    const val TITLE = "W204 · C 200 CDI"
     const val ENGINE = "OM651"
 
     const val RPM_GAUGE_MAX = 5000f

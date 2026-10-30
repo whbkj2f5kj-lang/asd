@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import kotlin.math.sin
 
@@ -35,6 +37,26 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
 
     private var job: Job? = null
     @Volatile private var elm: Elm327? = null
+
+    /** Der Adapter kann nur eine Anfrage gleichzeitig – Dashboard und Scanner wechseln sich ab. */
+    private val lock = Mutex()
+
+    /**
+     * Exklusiver, nur-lesender Zugriff für den Steuergeräte-Scanner. Die Anzeigen pausieren
+     * nur für die Dauer von [block]. Liefert null ohne aktive Verbindung.
+     */
+    suspend fun <T> withAdapter(block: (SafeElm) -> T): T? {
+        val e = elm ?: return null
+        if (_status.value.state != ConnState.CONNECTED) return null
+        return lock.withLock {
+            val safe = SafeElm(e)
+            try {
+                block(safe)
+            } finally {
+                safe.restore()
+            }
+        }
+    }
 
     fun start(address: String?, demo: Boolean) {
         stop()
@@ -155,6 +177,7 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
                 if (slow.isNotEmpty()) add(slow[cycle % slow.size])
             }
             var gotAny = false
+            lock.withLock {
             for (pid in batch) {
                 try {
                     val r = e.send(pid.command + suffix)
@@ -175,6 +198,7 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
                 runCatching { ObdParser.voltage(e.send("ATRV")) }.getOrNull()?.let { v ->
                     _vehicle.update { it.copy(voltage = v) }
                 }
+            }
             }
 
             if (gotAny || batch.isEmpty()) {
