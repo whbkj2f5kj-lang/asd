@@ -81,16 +81,7 @@ fun LaneView(
         val cam = ChaseCam(size.width, size.height)
         val zNear = -5f
 
-        if (transparent) {
-            // Schwebt frei im Cockpit: nur ein sanfter Lichtschein unter der Straße
-            drawRect(
-                Brush.verticalGradient(
-                    listOf(Color.Transparent, J.accent.copy(alpha = 0.05f), Color.Transparent),
-                    startY = cam.horizonY,
-                    endY = size.height,
-                )
-            )
-        } else {
+        if (!transparent) {
             // Ferner Himmel/Straße: sanfter Verlauf zum Horizont
             drawRect(
                 Brush.verticalGradient(
@@ -151,6 +142,14 @@ fun LaneView(
                     drawText(layout, topLeft = Offset(bx - layout.size.width / 2f, top))
                 }
             }
+        }
+
+        // Frei schwebend: Straße läuft nach unten weich aus
+        if (transparent) {
+            drawRect(
+                Brush.verticalGradient(listOf(Color.Transparent, J.bg), startY = size.height * 0.80f, endY = size.height),
+                topLeft = Offset(0f, size.height * 0.80f),
+            )
         }
 
         // Eigenes Auto

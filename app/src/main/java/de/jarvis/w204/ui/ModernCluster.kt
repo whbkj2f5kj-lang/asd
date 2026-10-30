@@ -105,7 +105,7 @@ fun ModernCluster(
                         sub = null,
                         size = big,
                         alignEnd = false,
-                        modifier = Modifier.weight(0.4f).padding(start = 18.dp, top = h * 0.18f),
+                        modifier = Modifier.weight(0.42f).padding(start = 16.dp, top = h * 0.18f),
                     )
                     ChevronGauge(
                         value = v.speed?.toFloat(),
@@ -114,7 +114,7 @@ fun ModernCluster(
                         label = { if (it.toInt() in setOf(0, 30, 60, 90, 120, 150, 180, 220)) it.toInt().toString() else null },
                         unit = "km/h",
                         mirrored = false,
-                        modifier = Modifier.weight(0.6f).fillMaxHeight(),
+                        modifier = Modifier.weight(0.58f).fillMaxHeight(),
                     )
                 }
 
@@ -131,7 +131,7 @@ fun ModernCluster(
                         unit = "×1000 U/min",
                         mirrored = true,
                         redFrom = W204Profile.RPM_RED_FROM,
-                        modifier = Modifier.weight(0.6f).fillMaxHeight(),
+                        modifier = Modifier.weight(0.58f).fillMaxHeight(),
                     )
                     BigValue(
                         value = v.boostBar?.let { fmt1(it) } ?: "–",
@@ -139,7 +139,7 @@ fun ModernCluster(
                         sub = v.load?.let { "$it % Last" },
                         size = big,
                         alignEnd = true,
-                        modifier = Modifier.weight(0.4f).padding(end = 20.dp, top = h * 0.18f),
+                        modifier = Modifier.weight(0.42f).padding(end = 18.dp, top = h * 0.18f),
                     )
                 }
             }
@@ -158,10 +158,15 @@ private fun BigValue(
     alignEnd: Boolean,
     modifier: Modifier,
 ) {
-    Column(modifier, horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
-        Text(value, color = J.text, fontSize = size, lineHeight = size, fontWeight = FontWeight.Light, maxLines = 1, softWrap = false)
+    BoxWithConstraints(modifier) {
+        // Schrift so groß wie möglich, aber "131" muss immer ganz hineinpassen
+        val fit = (maxWidth.value / (3.2f * 0.56f)).sp
+        val fs = if (fit.value < size.value) fit else size
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
+        Text(value, color = J.text, fontSize = fs, lineHeight = fs, fontWeight = FontWeight.Light, maxLines = 1, softWrap = false)
         Text(unit, color = J.dim, fontSize = 16.sp)
         if (sub != null) Text(sub, color = J.dim, fontSize = 13.sp)
+    }
     }
 }
 
