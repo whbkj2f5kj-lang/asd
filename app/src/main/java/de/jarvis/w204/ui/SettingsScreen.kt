@@ -48,6 +48,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     val status by vm.obd.status.collectAsStateWithLifecycle()
     val camCount by vm.cameraCount.collectAsStateWithLifecycle()
     val usbCams by vm.usbCameraNames.collectAsStateWithLifecycle()
+    val usbAll by vm.usbAll.collectAsStateWithLifecycle()
     var devices by remember { mutableStateOf(bondedDevices(context)) }
 
     Surface(Modifier.fillMaxSize(), color = J.bg) {
@@ -160,6 +161,9 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         if (usbCams.isEmpty()) "USB-Kameras: keine gefunden"
                         else "USB-Kameras: " + usbCams.joinToString()
                     )
+                    Spacer(Modifier.height(6.dp))
+                    Text("USB-Diagnose (alle Geräte, alle 3 s)", color = J.text, fontSize = 15.sp)
+                    usbAll.forEach { Hint("• $it") }
                     Hint("„Automatisch“ nimmt die USB-Kamera direkt, sobald eine steckt – auch wenn das Radio sie Android nicht meldet.")
                     Spacer(Modifier.height(6.dp))
                     if (camCount == 0) {

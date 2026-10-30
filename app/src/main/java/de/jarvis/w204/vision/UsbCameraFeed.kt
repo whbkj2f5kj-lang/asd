@@ -41,6 +41,30 @@ fun usbCameras(context: Context): List<UsbDevice> = try {
     emptyList()
 }
 
+/** Alle USB-Geräte mit Klassen – zur Diagnose, wenn eine Kamera nicht erkannt wird. */
+fun usbDiagnostics(context: Context): List<String> = try {
+    val manager = context.getSystemService(UsbManager::class.java)
+    manager?.deviceList?.values.orEmpty().map { d ->
+        val classes = (0 until d.interfaceCount).map { d.getInterface(it).interfaceClass }.distinct()
+        val kind = when {
+            d.isUvcCamera() -> "KAMERA"
+            8 in classes -> "Speicher"
+            9 == d.deviceClass -> "Hub"
+            3 in classes -> "Eingabe"
+            1 in classes -> "Audio"
+            2 in classes || 10 in classes -> "Netzwerk/Seriell"
+            else -> "Sonstiges"
+        }
+        val name = listOfNotNull(
+            runCatching { d.manufacturerName }.getOrNull(),
+            runCatching { d.productName }.getOrNull(),
+        ).joinToString(" ").ifBlank { "unbenannt" }
+        "$kind: $name · %04X:%04X · Klasse ${d.deviceClass}, Schnittstellen $classes".format(d.vendorId, d.productId)
+    }.ifEmpty { listOf("Android meldet gar keine USB-Geräte") }
+} catch (t: Throwable) {
+    listOf("USB-Abfrage fehlgeschlagen: ${t.message}")
+}
+
 fun UsbDevice.label(): String {
     val name = runCatching { productName }.getOrNull()?.takeIf { it.isNotBlank() } ?: "USB-Kamera"
     return "$name (%04X:%04X)".format(vendorId, productId)

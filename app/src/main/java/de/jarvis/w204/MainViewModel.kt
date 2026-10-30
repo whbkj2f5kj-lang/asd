@@ -47,6 +47,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Angeschlossene USB-Kameras (Name), alle 3 s aktualisiert */
     val usbCameraNames = MutableStateFlow<List<String>>(emptyList())
+    val usbAll = MutableStateFlow<List<String>>(emptyList())
 
     private val sceneBuilder = SceneBuilder()
 
@@ -102,6 +103,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) {
                 usbCameraNames.value = de.jarvis.w204.vision.usbCameras(getApplication()).map { it.label() }
+                usbAll.value = de.jarvis.w204.vision.usbDiagnostics(getApplication())
                 kotlinx.coroutines.delay(3000)
             }
         }
