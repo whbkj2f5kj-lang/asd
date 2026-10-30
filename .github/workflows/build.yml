@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -20,9 +20,21 @@ jobs:
           gradle-version: "8.9"
 
       - name: APK bauen
-        run: gradle assembleDebug --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle assembleDebug --console=plain 2>&1 | tee build.log
+
+      - name: Fehler zusammenfassen
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "^e: |error:|What went wrong|Could not|> |Caused by" build.log | head -80 > errors.txt || true
+          [ -s errors.txt ] || tail -60 build.log > errors.txt
+          msg=$(sed -e 's/%/%25/g' errors.txt | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Build-Fehler::$msg"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: JarvisW204-apk
+          name: DashboardW204-apk
           path: app/build/outputs/apk/debug/*.apk
