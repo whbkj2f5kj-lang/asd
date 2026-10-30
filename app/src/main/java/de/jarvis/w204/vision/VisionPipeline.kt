@@ -41,7 +41,7 @@ class VisionPipeline(
     private var vehicleRuns = 0
 
     private val _preview = MutableStateFlow<ImageBitmap?>(null)
-    /** Letztes Kamerabild zur Anzeige (Android-Kamera), ca. 15 Bilder/s */
+    /** Letztes Kamerabild zur Anzeige (Android-Kamera), bis 30 Bilder/s */
     val preview: StateFlow<ImageBitmap?> = _preview
     private var lastPreview = 0L
 
@@ -49,12 +49,19 @@ class VisionPipeline(
         _preview.value = null
     }
 
-    /** Android-Kamera (CameraX) */
+    /** Auswertung läuft getrennt von der Anzeige, damit das Kamerabild flüssig bleibt. */
+    private val procExecutor = Executors.newSingleThreadExecutor()
+    private val procBusy = AtomicBoolean(false)
+
+    /**
+     * Android-Kamera (CameraX). Dieser Thread holt nur das Bild ab und zeigt es an (bis 30 fps).
+     * Die Erkennung bekommt immer das neueste Bild, sobald sie mit dem vorherigen fertig ist.
+     */
     override fun analyze(image: ImageProxy) {
         try {
             val now = SystemClock.elapsedRealtime()
             val showPreview = now - lastPreview >= PREVIEW_INTERVAL_MS
-            val analyse = due()
+            val analyse = !procBusy.get() && due()
             if (!showPreview && !analyse) return
             var bmp = image.toBitmap()
             // Manche Radios liefern krumme Werte (z. B. 359°) – auf 0/90/180/270 runden
@@ -66,7 +73,19 @@ class VisionPipeline(
                 lastPreview = now
                 _preview.value = bmp.asImageBitmap()
             }
-            if (analyse) guarded(bmp)
+            if (analyse) {
+                procBusy.set(true)
+                val frame = bmp
+                procExecutor.execute {
+                    try {
+                        guarded(frame)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Bildanalyse fehlgeschlagen", t)
+                    } finally {
+                        procBusy.set(false)
+                    }
+                }
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "Bildanalyse fehlgeschlagen", t)
         } finally {
@@ -160,6 +179,7 @@ class VisionPipeline(
 
     fun close() {
         usbExecutor.shutdown()
+        procExecutor.shutdown()
         signs.close()
         vehicles?.close()
     }
@@ -168,6 +188,6 @@ class VisionPipeline(
         private const val TAG = "VisionPipeline"
         private const val SCAN_WIDTH = 320
         private const val MIN_INTERVAL_MS = 110L
-        private const val PREVIEW_INTERVAL_MS = 66L
+        private const val PREVIEW_INTERVAL_MS = 30L
     }
 }
