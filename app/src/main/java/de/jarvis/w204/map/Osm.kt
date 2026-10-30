@@ -107,10 +107,11 @@ object Osm {
     const val TILE_LAT = 0.02   // ≈ 2,2 km
     const val TILE_LON = 0.03   // ≈ 2 km in Deutschland
 
-    fun tileOf(lat: Double, lon: Double) = floor(lat / TILE_LAT).toInt() to floor(lon / TILE_LON).toInt()
+    // ganzzahlig in Hundertstel-Grad rechnen, damit Kachelgrenzen exakt sind (2 bzw. 3 Hundertstel)
+    fun tileOf(lat: Double, lon: Double) = floor(lat * 100 / 2 + 1e-9).toInt() to floor(lon * 100 / 3 + 1e-9).toInt()
     fun tileKey(ty: Int, tx: Int): Long = (ty.toLong() shl 32) or (tx.toLong() and 0xFFFFFFFFL)
     /** s, w, n, e */
-    fun bbox(ty: Int, tx: Int) = doubleArrayOf(ty * TILE_LAT, tx * TILE_LON, (ty + 1) * TILE_LAT, (tx + 1) * TILE_LON)
+    fun bbox(ty: Int, tx: Int) = doubleArrayOf(ty * 2 / 100.0, tx * 3 / 100.0, (ty + 1) * 2 / 100.0, (tx + 1) * 3 / 100.0)
 
     const val ROADS = "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|" +
         "tertiary|tertiary_link|unclassified|residential|living_street|road"
