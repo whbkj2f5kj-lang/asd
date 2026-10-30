@@ -20,6 +20,11 @@ class DiagTest {
         }
     }
 
+    @Test fun privateIdsBlocked() {
+        listOf("22F190", "22F1A0", "22F18C", "0902").forEach { assertFalse(it, ReadOnly.isAllowed(it)) }
+        assertTrue(ReadOnly.isAllowed("22F187"))
+    }
+
     @Test fun singleFramePositive() =
         assertEquals(Reply.Positive("6130AABB"), DiagParser.parse("61 30 AA BB\r\r", 0x21))
 

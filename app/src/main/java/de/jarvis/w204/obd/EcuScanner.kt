@@ -40,8 +40,13 @@ object ReadOnly {
      */
     private val allowed = setOf("01", "03", "07", "09", "0A", "18", "1A", "21", "22")
 
+    /** Persönliche Kennungen werden nie gelesen: FIN (F190, F1A0) und Seriennummer (F18C). */
+    val privateDids = setOf(0xF190, 0xF1A0, 0xF18C)
+
     fun isAllowed(cmd: String): Boolean {
         val c = cmd.uppercase().replace(" ", "")
+        if (c.length == 6 && c.startsWith("22") && c.substring(2).toIntOrNull(16) in privateDids) return false
+        if (c == "0902") return false   // OBD-FIN
         if (c.length < 2 || c.length > 8 || c.length % 2 != 0) return false
         if (!c.all { it in "0123456789ABCDEF" }) return false
         val sid = c.substring(0, 2)
@@ -59,6 +64,10 @@ class SafeElm internal constructor(private val e: Elm327) {
         require(h.matches(Regex("7E[0-7]|7DF"))) { "Unerlaubte Adresse $h" }
         if (h != header) {
             e.send("ATSH$h")
+            // Nur Antworten genau dieses Steuergeräts annehmen (Antwort-ID = Anfrage-ID + 8).
+            // Manche ELM-Klone ignorieren sonst die Adresse, und es antwortet immer der Motor.
+            if (h == "7DF") runCatching { e.send("ATCRA") }
+            else runCatching { e.send("ATCRA" + "%03X".format(h.toInt(16) + 8)) }
             header = h
         }
     }
@@ -69,7 +78,10 @@ class SafeElm internal constructor(private val e: Elm327) {
     }
 
     internal fun restore() {
-        if (header != null && header != "7DF") runCatching { e.send("ATSH7DF") }
+        if (header != null && header != "7DF") {
+            runCatching { e.send("ATCRA") }
+            runCatching { e.send("ATSH7DF") }
+        }
         header = null
     }
 }
@@ -198,7 +210,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 val p = line.split(';')
                 if (p.size == 5) {
                     val h = Hit(p[0], p[1], p[2].toInt(16), p[3].toInt(16), p[4])
-                    hits[h.key] = h
+                    if (!(h.service == 0x22 && h.id in ReadOnly.privateDids)) hits[h.key] = h
                 }
             }
         }
@@ -280,10 +292,12 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
 
     /** [full] = alle 65.536 UDS-Kennungen pro Steuergerät (dauert, kann angehalten und fortgesetzt werden). */
     fun scan(full: Boolean) = run(if (full) "Komplett-Scan läuft …" else "Schnell-Scan läuft …") {
+        // Komplett: wahrscheinlichste Messwert-Bereiche zuerst, Kenndaten (F1xx) hat der Schnell-Scan schon
+        val fullRanges = listOf(0x1000..0x3FFF, 0x0000..0x0FFF, 0x4000..0xEFFF, 0xF200..0xFFFF, 0xF000..0xF0FF)
         val tasks = buildList {
             for (ecu in ecus) {
                 add(Task(ecu, 0x21, 0x00..0xFF, resumable = false))
-                if (full) add(Task(ecu, 0x22, 0x0000..0xFFFF, resumable = true))
+                if (full) fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) }
                 else add(Task(ecu, 0x22, 0xF100..0xF1FF, resumable = false))
             }
         }
@@ -291,7 +305,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
         var done = 0
 
         for (t in tasks) {
-            val resumeKey = "next_${t.ecu.header}_%02X".format(t.service)
+            val resumeKey = "next_${t.ecu.header}_%02X_%04X".format(t.service, t.range.first)
             var id = if (t.resumable) prefs.getInt(resumeKey, t.range.first).coerceIn(t.range.first, t.range.last + 1) else t.range.first
             done += id - t.range.first
             var notSupported = 0
@@ -304,7 +318,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 val first = id
                 val replies = adapter { e ->
                     e.target(t.ecu.header)
-                    (first..end).map { i ->
+                    (first..end).filter { !(t.service == 0x22 && it in ReadOnly.privateDids) }.map { i ->
                         val cmd = if (t.service == 0x21) "21%02X".format(i) else "22%04X".format(i)
                         i to DiagParser.parse(e.request(cmd, 1000), t.service)
                     }
@@ -349,9 +363,10 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
             _state.update { it.copy(recording = false, phase = "Aufzeichnung beendet – ${rows.size} Messpunkte") }
             return
         }
-        val list = hits.values.toList()
+        // Kenndaten (F1xx) ändern sich nie – nur mögliche Live-Werte aufzeichnen
+        val list = hits.values.filter { !(it.service == 0x22 && it.id in 0xF100..0xF1FF) }
         if (list.isEmpty()) {
-            _state.update { it.copy(phase = "Erst scannen – noch keine Werte gefunden") }
+            _state.update { it.copy(phase = "Noch keine Live-Werte gefunden – bitte erst den Komplett-Scan laufen lassen") }
             return
         }
         rowHeader = (listOf("zeit", "drehzahl", "kmh", "kuehlmittel_c", "aussen_c", "last_pct", "saugrohr_kpa", "spannung_v") +
@@ -399,7 +414,8 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 appendLine("# Kennungen")
                 idents.forEach { appendLine(it) }
                 appendLine("# Treffer: steuergeraet;adresse;anfrage;antwort")
-                hits.values.forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data}") }
+                hits.values.filter { !(it.service == 0x22 && it.id in ReadOnly.privateDids) }
+                    .forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data}") }
                 if (rows.isNotEmpty()) {
                     appendLine("# Aufzeichnung")
                     appendLine(rowHeader)
