@@ -18,23 +18,30 @@ class ElmTimeoutException(cmd: String) : IOException("Timeout bei $cmd")
 class Elm327 private constructor(private val socket: BluetoothSocket) : Closeable {
     private val input: InputStream = socket.inputStream
     private val output: OutputStream = socket.outputStream
+    private val buf = ByteArray(512)
 
     /** Sendet einen Befehl und liest bis zum Prompt '>'. */
     @Synchronized
     fun send(cmd: String, timeoutMs: Long = 1500): String {
-        while (input.available() > 0) input.read()
+        // Reste einer alten Antwort verwerfen
+        while (input.available() > 0) { if (input.read(buf, 0, minOf(input.available(), buf.size)) <= 0) break }
         output.write("$cmd\r".toByteArray(Charsets.US_ASCII))
         output.flush()
         val sb = StringBuilder()
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (input.available() > 0) {
-                val c = input.read()
-                if (c < 0) throw IOException("Verbindung getrennt")
-                if (c == '>'.code) return sb.toString().trim()
-                sb.append(c.toChar())
+            val n = input.available()
+            if (n > 0) {
+                // blockweise lesen: deutlich weniger Systemaufrufe als Byte für Byte
+                val r = input.read(buf, 0, minOf(n, buf.size))
+                if (r < 0) throw IOException("Verbindung getrennt")
+                for (i in 0 until r) {
+                    val c = buf[i].toInt() and 0xFF
+                    if (c == '>'.code) return sb.toString().trim()
+                    sb.append(c.toChar())
+                }
             } else {
-                Thread.sleep(4)
+                Thread.sleep(2)
             }
         }
         throw ElmTimeoutException(cmd)

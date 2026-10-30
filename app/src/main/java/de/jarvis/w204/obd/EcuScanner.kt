@@ -314,7 +314,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
 
             while (id <= t.range.last) {
                 currentCoroutineContext().ensureActive()
-                val end = min(id + 24, t.range.last)
+                val end = min(id + 7, t.range.last)
                 val first = id
                 val replies = adapter { e ->
                     e.target(t.ecu.header)
@@ -377,7 +377,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
             while (currentCoroutineContext().isActive) {
                 val values = HashMap<String, String>()
                 try {
-                    for (chunk in list.chunked(15)) {
+                    for (chunk in list.chunked(6)) {
                         val part = adapter { e ->
                             chunk.map { h ->
                                 e.target(h.header)

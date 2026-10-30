@@ -89,6 +89,27 @@ object ObdParser {
         Pid.AMBIENT -> s.copy(ambient = d[0] - 40)
     }
 
+    /**
+     * Antwort auf eine Sammelanfrage wie "010C0D0B04": 41 0C xx xx 0D xx 0B xx 04 xx
+     * (bei mehr als 7 Byte als mehrteilige Antwort). Liefert alle erkannten Werte.
+     */
+    fun parseMulti(raw: String, pids: List<Pid>): Map<Pid, IntArray> {
+        val byCode = pids.associateBy { it.code }
+        val out = HashMap<Pid, IntArray>()
+        for (m in DiagParser.messages(raw)) {
+            if (!m.startsWith("41")) continue
+            val b = m.substring(2).chunked(2).filter { it.length == 2 }.map { it.toInt(16) }
+            var i = 0
+            while (i < b.size) {
+                val p = byCode[b[i]] ?: break
+                if (i + 1 + p.bytes > b.size) break
+                out[p] = IntArray(p.bytes) { b[i + 1 + it] }
+                i += 1 + p.bytes
+            }
+        }
+        return out
+    }
+
     /** Antwort auf ATRV, z. B. "12.6V" */
     fun voltage(raw: String): Double? =
         Regex("(\\d{1,2}[.,]\\d)").find(raw)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()

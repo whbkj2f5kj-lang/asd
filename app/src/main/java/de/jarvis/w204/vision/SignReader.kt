@@ -100,7 +100,7 @@ class SignReader(private val onLimit: (Int) -> Unit) {
             .map { c ->
                 val l = c[0] * scale; val t = c[1] * scale
                 val r = (c[2] + 1) * scale; val b = (c[3] + 1) * scale
-                SignBox(l / full.width, t / full.height, r / full.width, b / full.height, readNumber(full, l, t, r, b))
+                SignBox(l / full.width, t / full.height, r / full.width, b / full.height, cachedRead(full, l, t, r, b, now))
             }
         confirm(now, boxes)
         return boxes
@@ -108,6 +108,26 @@ class SignReader(private val onLimit: (Int) -> Unit) {
 
     fun close() {
         runCatching { recognizer?.close() }
+    }
+
+    private data class Read(val l: Float, val t: Float, val r: Float, val b: Float, val value: Int?, val at: Long)
+    private val recent = ArrayDeque<Read>()
+
+    private fun overlap(a: Read, l: Float, t: Float, r: Float, b: Float): Float {
+        val iw = (minOf(a.r, r) - maxOf(a.l, l)).coerceAtLeast(0f)
+        val ih = (minOf(a.b, b) - maxOf(a.t, t)).coerceAtLeast(0f)
+        val inter = iw * ih
+        val union = (a.r - a.l) * (a.b - a.t) + (r - l) * (b - t) - inter
+        return if (union <= 0f) 0f else inter / union
+    }
+
+    /** Ergebnis wiederverwenden, wenn dasselbe Schild gerade (≤ 350 ms) schon gelesen wurde. */
+    private fun cachedRead(full: Bitmap, l: Float, t: Float, r: Float, b: Float, now: Long): Int? {
+        while (recent.isNotEmpty() && now - recent.first().at > 350) recent.removeFirst()
+        recent.firstOrNull { overlap(it, l, t, r, b) > 0.5f }?.let { return it.value }
+        val v = readNumber(full, l, t, r, b)
+        recent.addLast(Read(l, t, r, b, v, now))
+        return v
     }
 
     private fun readNumber(full: Bitmap, l: Float, t: Float, r: Float, b: Float): Int? {

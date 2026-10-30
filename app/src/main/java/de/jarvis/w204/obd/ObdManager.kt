@@ -167,6 +167,8 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
 
         var cycle = 0
         var timeouts = 0
+        var multi: Boolean? = null   // null = noch nicht getestet
+        var multiFails = 0
         var noData = 0
         var count = 0
         var windowStart = SystemClock.elapsedRealtime()
@@ -174,11 +176,30 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
         while (currentCoroutineContext().isActive) {
             val batch = buildList {
                 addAll(fast)
-                if (slow.isNotEmpty()) add(slow[cycle % slow.size])
-            }
+                if (slow.isNotEmpty()) add(slow[(cycle * 2) % slow.size])
+                if (slow.size > 1 && multi == true) add(slow[(cycle * 2 + 1) % slow.size])
+            }.distinct().take(6)
             var gotAny = false
             lock.withLock {
-            for (pid in batch) {
+            if (multi != false && batch.size > 1) {
+                // Sammelanfrage: alle Werte dieser Runde in einem Durchgang (spart Funk-Rundreisen)
+                try {
+                    val r = e.send("01" + batch.joinToString("") { "%02X".format(it.code) } + suffix, 2000)
+                    timeouts = 0
+                    val got = ObdParser.parseMulti(r, batch)
+                    if (got.isNotEmpty()) {
+                        multi = true
+                        gotAny = true
+                        count += got.size
+                        _vehicle.update { v -> got.entries.fold(v) { acc, (p, d) -> ObdParser.apply(acc, p, d) } }
+                    } else if (multi == null && ++multiFails >= 3) {
+                        multi = false   // Steuergerät/Adapter kann es nicht -> einzeln abfragen
+                    }
+                } catch (t: ElmTimeoutException) {
+                    if (++timeouts >= 5) throw IOException("Adapter antwortet nicht mehr")
+                    if (multi == null && ++multiFails >= 3) multi = false
+                }
+            } else for (pid in batch) {
                 try {
                     val r = e.send(pid.command + suffix)
                     timeouts = 0

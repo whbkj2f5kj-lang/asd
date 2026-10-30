@@ -78,4 +78,23 @@ class ObdParserTest {
         assertTrue(s.fuelEstimated)
         assertEquals(8.95, s.consumption!!, 0.05)
     }
+
+    @Test fun multiPidSingleFrame() {
+        val got = ObdParser.parseMulti("410C1AF80D32\r", listOf(Pid.RPM, Pid.SPEED))
+        assertEquals(2, got.size)
+        assertEquals(1726, ObdParser.apply(VehicleState(), Pid.RPM, got[Pid.RPM]!!).rpm)
+        assertEquals(50, ObdParser.apply(VehicleState(), Pid.SPEED, got[Pid.SPEED]!!).speed)
+    }
+
+    @Test fun multiPidMultiFrame() {
+        // 41 0C 1A F8 0D 32 0B 65 04 40 = 10 Byte, als ISO-TP mehrteilig
+        val raw = "00A\r0:410C1AF80D32\r1:0B650440000000\r"
+        val got = ObdParser.parseMulti(raw, listOf(Pid.RPM, Pid.SPEED, Pid.MAP, Pid.LOAD))
+        assertEquals(4, got.size)
+        assertEquals(0x65, got[Pid.MAP]!![0])
+        assertEquals(0x40, got[Pid.LOAD]!![0])
+    }
+
+    @Test fun multiPidUnsupportedGivesEmpty() =
+        assertTrue(ObdParser.parseMulti("NO DATA", listOf(Pid.RPM, Pid.SPEED)).isEmpty())
 }

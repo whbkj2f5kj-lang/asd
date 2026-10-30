@@ -44,6 +44,8 @@ class VisionPipeline(
     /** Letztes Kamerabild zur Anzeige (Android-Kamera), bis 30 Bilder/s */
     val preview: StateFlow<ImageBitmap?> = _preview
     private var lastPreview = 0L
+    private var convMs = 8.0
+    private var previewInterval = PREVIEW_INTERVAL_MS
 
     fun clearPreview() {
         _preview.value = null
@@ -60,15 +62,19 @@ class VisionPipeline(
     override fun analyze(image: ImageProxy) {
         try {
             val now = SystemClock.elapsedRealtime()
-            val showPreview = now - lastPreview >= PREVIEW_INTERVAL_MS
+            val showPreview = now - lastPreview >= previewInterval
             val analyse = !procBusy.get() && due()
             if (!showPreview && !analyse) return
+            val t0 = SystemClock.elapsedRealtime()
             var bmp = image.toBitmap()
             // Manche Radios liefern krumme Werte (z. B. 359°) – auf 0/90/180/270 runden
             val rot = (((image.imageInfo.rotationDegrees + 45) / 90) * 90) % 360
             if (rot != 0) {
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(rot.toFloat()) }, true)
             }
+            // Umwandlungszeit messen: braucht das Gerät lange, seltener anzeigen (max. ~3× Umwandlungszeit)
+            convMs = convMs * 0.9 + (SystemClock.elapsedRealtime() - t0) * 0.1
+            previewInterval = maxOf(PREVIEW_INTERVAL_MS, (convMs * 3).toLong())
             if (showPreview) {
                 lastPreview = now
                 _preview.value = bmp.asImageBitmap()
