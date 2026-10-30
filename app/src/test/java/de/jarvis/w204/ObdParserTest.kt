@@ -24,7 +24,7 @@ class ObdParserTest {
 
     @Test fun boostStandardMap() {
         val s = parse(Pid.BARO, "413365", parse(Pid.MAP, "410BC8"))
-        assertEquals(1.0, s.boostBar!!, 0.01)   // 200 - 101 kPa
+        assertEquals(0.99, s.boostBar!!, 0.001)   // 200 - 101 kPa
     }
 
     @Test fun boostExtendedAbove255kPa() {
