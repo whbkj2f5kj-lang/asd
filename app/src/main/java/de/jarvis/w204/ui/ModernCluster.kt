@@ -1,6 +1,5 @@
 package de.jarvis.w204.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -188,7 +187,7 @@ private fun StatusBar(v: VehicleState, message: String?, clock: String) {
         Text(clock, color = J.text, fontSize = 20.sp, fontWeight = FontWeight.Light)
 
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {
+            androidx.compose.animation.AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {
                 Row(
                     Modifier.clip(RoundedCornerShape(50)).background(J.panel2).padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
