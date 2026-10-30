@@ -70,6 +70,7 @@ import de.jarvis.w204.car.VehicleState
 import de.jarvis.w204.car.W204Profile
 import de.jarvis.w204.car.fmt1
 import de.jarvis.w204.vision.CameraFeed
+import de.jarvis.w204.vision.UsbCameraFeed
 import de.jarvis.w204.vision.Scene
 import de.jarvis.w204.voice.VoiceInput
 import kotlinx.coroutines.delay
@@ -494,15 +495,29 @@ private fun CameraWithOverlay(vm: MainViewModel, modifier: Modifier, showHorizon
     val settings by vm.settings.collectAsStateWithLifecycle()
     val frame by vm.visionFrame.collectAsStateWithLifecycle()
     val error by vm.cameraError.collectAsStateWithLifecycle()
+    val usbCams by vm.usbCameraNames.collectAsStateWithLifecycle()
+    val useUsb = when (settings.cameraSource) {
+        1 -> false
+        2 -> true
+        else -> usbCams.isNotEmpty()
+    }
 
     Box(modifier.background(Color.Black)) {
-        CameraFeed(
-            cameraIndex = settings.cameraIndex,
-            analyzer = vm.vision,
-            onCameras = { vm.cameraCount.value = it },
-            onError = { vm.cameraError.value = it },
-            modifier = Modifier.fillMaxSize(),
-        )
+        if (useUsb) {
+            UsbCameraFeed(
+                vision = vm.vision,
+                onStatus = { vm.cameraError.value = it },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            CameraFeed(
+                cameraIndex = settings.cameraIndex,
+                analyzer = vm.vision,
+                onCameras = { vm.cameraCount.value = it },
+                onError = { vm.cameraError.value = it },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Canvas(Modifier.fillMaxSize().clickable(onClick = onClick)) {
             val f = frame
             val fw = f?.width ?: 16

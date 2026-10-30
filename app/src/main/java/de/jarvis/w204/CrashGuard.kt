@@ -78,11 +78,11 @@ object CrashGuard {
         }
     }
 
-    private fun enter(stage: String) {
+    fun enter(stage: String) {
         if (::sp.isInitialized) sp.edit().putBoolean(PREFIX + stage, true).commit()
     }
 
-    private fun leave(stage: String) {
+    fun leave(stage: String) {
         if (::sp.isInitialized) sp.edit().remove(PREFIX + stage).commit()
     }
 
@@ -92,6 +92,7 @@ object CrashGuard {
 
     fun describe(stage: String): String = when (stage) {
         "camera" -> "Kamera starten"
+        "usb_camera" -> "USB-Kamera öffnen"
         "frame" -> "erstes Kamerabild verarbeiten"
         "vehicles_init" -> "Fahrzeugerkennung laden"
         "vehicles_run" -> "Fahrzeugerkennung"

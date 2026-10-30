@@ -47,6 +47,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val status by vm.obd.status.collectAsStateWithLifecycle()
     val camCount by vm.cameraCount.collectAsStateWithLifecycle()
+    val usbCams by vm.usbCameraNames.collectAsStateWithLifecycle()
     var devices by remember { mutableStateOf(bondedDevices(context)) }
 
     Surface(Modifier.fillMaxSize(), color = J.bg) {
@@ -120,8 +121,32 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     SwitchRow("Kamera verwenden", settings.cameraEnabled) { on -> vm.update { it.copy(cameraEnabled = on) } }
                     SwitchRow("Schildererkennung", settings.signRecognition) { on -> vm.update { it.copy(signRecognition = on) } }
                     SwitchRow("Fahrzeug- und Spurerkennung", settings.objectRecognition) { on -> vm.update { it.copy(objectRecognition = on) } }
+                    Spacer(Modifier.height(6.dp))
+                    Text("Kameraquelle", color = J.text, fontSize = 15.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Automatisch", "Android-Kamera", "USB direkt").forEachIndexed { i, label ->
+                            val sel = settings.cameraSource == i
+                            Text(
+                                label,
+                                color = if (sel) J.bg else J.text,
+                                fontSize = 14.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (sel) J.accent else J.panel2)
+                                    .clickable { vm.update { it.copy(cameraSource = i) } }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    Hint(
+                        if (usbCams.isEmpty()) "USB-Kameras: keine gefunden"
+                        else "USB-Kameras: " + usbCams.joinToString()
+                    )
+                    Hint("„Automatisch“ nimmt die USB-Kamera direkt, sobald eine steckt – auch wenn das Radio sie Android nicht meldet.")
+                    Spacer(Modifier.height(6.dp))
                     if (camCount == 0) {
-                        Hint("Keine Kamera gefunden. USB-Kamera anstecken und App neu starten.")
+                        Hint("Android-Kameras: keine")
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             repeat(camCount) { i ->

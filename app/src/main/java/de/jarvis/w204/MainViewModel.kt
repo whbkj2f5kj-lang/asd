@@ -10,6 +10,7 @@ import de.jarvis.w204.vision.Scene
 import de.jarvis.w204.vision.SceneBuilder
 import de.jarvis.w204.vision.VisionFrame
 import de.jarvis.w204.vision.VisionPipeline
+import de.jarvis.w204.vision.label
 import de.jarvis.w204.voice.Jarvis
 import de.jarvis.w204.voice.JarvisBrain
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val crashReport = MutableStateFlow<Pair<CrashGuard.Report, List<String>>?>(null)
     val cameraError = MutableStateFlow<String?>(null)
 
+    /** Angeschlossene USB-Kameras (Name), alle 3 s aktualisiert */
+    val usbCameraNames = MutableStateFlow<List<String>>(emptyList())
+
     private val sceneBuilder = SceneBuilder()
 
     /** Läuft im Analyse-Thread der Kamera. */
@@ -69,6 +73,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 s = s.copy(signRecognition = false); off += "Schildererkennung"
             }
             val visionStage = st.any { it.startsWith("vehicles") || it.startsWith("ocr") }
+            if ("usb_camera" in st || "libuvc" in t || "serenegiant" in t) {
+                s = s.copy(cameraSource = 1); off += "USB-Kamera-Treiber"
+            }
             if ("camera" in st || ("frame" in st && !visionStage) || (st.isEmpty() && "androidx.camera" in t)) {
                 s = s.copy(cameraEnabled = false); off += "Kamera"
             }
@@ -79,6 +86,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             crashReport.value = report to off
         }
         applyRuntime(_settings.value)
+
+        viewModelScope.launch {
+            while (true) {
+                usbCameraNames.value = de.jarvis.w204.vision.usbCameras(getApplication()).map { it.label() }
+                kotlinx.coroutines.delay(3000)
+            }
+        }
 
         // Neue Fahrt (Zündung an / Verbindung steht) -> Begrüßung
         viewModelScope.launch {

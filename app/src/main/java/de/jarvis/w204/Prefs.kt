@@ -13,6 +13,8 @@ data class Settings(
     val signRecognition: Boolean = true,
     val objectRecognition: Boolean = true,
     val cameraEnabled: Boolean = true,
+    /** 0 = automatisch, 1 = Android-Kamera, 2 = USB direkt */
+    val cameraSource: Int = 0,
     val cameraIndex: Int = 0,
     val camHeight: Float = 1.25f,
     val camFov: Float = 90f,
@@ -34,6 +36,7 @@ class Prefs(context: Context) {
         signRecognition = sp.getBoolean("signs", true),
         objectRecognition = sp.getBoolean("objects", true),
         cameraEnabled = sp.getBoolean("camOn", true),
+        cameraSource = sp.getInt("camSrc", 0),
         cameraIndex = sp.getInt("cam", 0),
         camHeight = sp.getFloat("camH", 1.25f),
         camFov = sp.getFloat("camFov", 90f),
@@ -51,6 +54,7 @@ class Prefs(context: Context) {
             .putBoolean("signs", s.signRecognition)
             .putBoolean("objects", s.objectRecognition)
             .putBoolean("camOn", s.cameraEnabled)
+            .putInt("camSrc", s.cameraSource)
             .putInt("cam", s.cameraIndex)
             .putFloat("camH", s.camHeight)
             .putFloat("camFov", s.camFov)
