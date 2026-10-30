@@ -117,6 +117,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
                     Spacer(Modifier.height(12.dp))
                     Section("Kamera")
+                    SwitchRow("Kamera verwenden", settings.cameraEnabled) { on -> vm.update { it.copy(cameraEnabled = on) } }
                     SwitchRow("Schildererkennung", settings.signRecognition) { on -> vm.update { it.copy(signRecognition = on) } }
                     SwitchRow("Fahrzeug- und Spurerkennung", settings.objectRecognition) { on -> vm.update { it.copy(objectRecognition = on) } }
                     if (camCount == 0) {

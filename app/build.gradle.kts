@@ -12,8 +12,8 @@ android {
         applicationId = "de.jarvis.w204"
         minSdk = 29          // Android 10 (Head-Unit)
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         // Nur ARM (Head-Units); manche Radios laufen trotz 64-Bit-Chip mit 32-Bit-Android
         val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a")
         ndk { abiFilters += abis }
@@ -31,7 +31,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     androidResources { noCompress += "tflite" }
 }
 

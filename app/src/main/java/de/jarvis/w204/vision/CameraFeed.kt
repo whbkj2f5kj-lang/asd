@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import de.jarvis.w204.CrashGuard
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.concurrent.Executors
 
@@ -83,8 +84,10 @@ fun CameraFeed(
                     .build()
                 analysis.setAnalyzer(executor, analyzer)
 
-                p.unbindAll()
-                p.bindToLifecycle(owner, selector, preview, analysis)
+                CrashGuard.guard("camera") {
+                    p.unbindAll()
+                    p.bindToLifecycle(owner, selector, preview, analysis)
+                }
                 onError(null)
             } catch (t: Throwable) {
                 onError("Kamera-Fehler: ${t.message}")

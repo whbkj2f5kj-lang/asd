@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import de.jarvis.w204.CrashGuard
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.max
@@ -31,8 +32,19 @@ class VisionPipeline(
     private var vehicles: VehicleDetector? = null
     private var vehiclesTried = false
     private var lastRun = 0L
+    private var frames = 0
+    private var vehicleRuns = 0
 
     override fun analyze(image: ImageProxy) {
+        if (frames < 3) {
+            frames++
+            CrashGuard.guard("frame") { process(image) }
+        } else {
+            process(image)
+        }
+    }
+
+    private fun process(image: ImageProxy) {
         try {
             val now = SystemClock.elapsedRealtime()
             if (now - lastRun < MIN_INTERVAL_MS) return
@@ -58,7 +70,7 @@ class VisionPipeline(
             if (objectsEnabled) {
                 vehicleDetector()?.let { det ->
                     val mid = Bitmap.createScaledBitmap(bmp, 640, max(1, bmp.height * 640 / bmp.width), true)
-                    objects = det.detect(mid)
+                    objects = if (vehicleRuns++ < 3) CrashGuard.guard("vehicles_run") { det.detect(mid) } else det.detect(mid)
                 }
                 laneResult = lanes.detect(px, sw, sh, calibration.horizon, now)
             }
@@ -74,7 +86,7 @@ class VisionPipeline(
     private fun vehicleDetector(): VehicleDetector? {
         if (!vehiclesTried) {
             vehiclesTried = true
-            vehicles = VehicleDetector.create(appContext)
+            vehicles = CrashGuard.guard("vehicles_init") { VehicleDetector.create(appContext) }
             if (vehicles == null) _detectorError.value = "Fahrzeugerkennung auf diesem Gerät nicht verfügbar"
         }
         return vehicles

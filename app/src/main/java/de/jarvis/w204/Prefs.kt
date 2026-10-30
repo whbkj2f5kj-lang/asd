@@ -12,6 +12,7 @@ data class Settings(
     val tolerance: Int = 5,
     val signRecognition: Boolean = true,
     val objectRecognition: Boolean = true,
+    val cameraEnabled: Boolean = true,
     val cameraIndex: Int = 0,
     val camHeight: Float = 1.25f,
     val camFov: Float = 90f,
@@ -32,6 +33,7 @@ class Prefs(context: Context) {
         tolerance = sp.getInt("tol", 5),
         signRecognition = sp.getBoolean("signs", true),
         objectRecognition = sp.getBoolean("objects", true),
+        cameraEnabled = sp.getBoolean("camOn", true),
         cameraIndex = sp.getInt("cam", 0),
         camHeight = sp.getFloat("camH", 1.25f),
         camFov = sp.getFloat("camFov", 90f),
@@ -48,6 +50,7 @@ class Prefs(context: Context) {
             .putInt("tol", s.tolerance)
             .putBoolean("signs", s.signRecognition)
             .putBoolean("objects", s.objectRecognition)
+            .putBoolean("camOn", s.cameraEnabled)
             .putInt("cam", s.cameraIndex)
             .putFloat("camH", s.camHeight)
             .putFloat("camFov", s.camFov)

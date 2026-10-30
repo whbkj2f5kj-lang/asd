@@ -39,6 +39,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val scene: StateFlow<Scene> = _scene
 
     val cameraCount = MutableStateFlow(0)
+
+    /** Bericht vom letzten Absturz + was deshalb abgeschaltet wurde. */
+    val crashReport = MutableStateFlow<Pair<CrashGuard.Report, List<String>>?>(null)
     val cameraError = MutableStateFlow<String?>(null)
 
     private val sceneBuilder = SceneBuilder()
@@ -54,6 +57,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     init {
+        CrashGuard.pending?.let { report ->
+            val t = report.text.lowercase()
+            val st = report.stages
+            val off = mutableListOf<String>()
+            var s = _settings.value
+            if ("vehicles_init" in st || "vehicles_run" in st || "mediapipe" in t) {
+                s = s.copy(objectRecognition = false); off += "Fahrzeug- und Spurerkennung"
+            }
+            if ("ocr_init" in st || "ocr_run" in st || "mlkit" in t) {
+                s = s.copy(signRecognition = false); off += "Schildererkennung"
+            }
+            if ("camera" in st || "frame" in st || "androidx.camera" in t) {
+                s = s.copy(cameraEnabled = false); off += "Kamera"
+            }
+            if (s != _settings.value) {
+                _settings.value = s
+                prefs.save(s)
+            }
+            crashReport.value = report to off
+        }
         applyRuntime(_settings.value)
 
         // Neue Fahrt (Zündung an / Verbindung steht) -> Begrüßung
@@ -76,6 +99,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_speedLimit.value == v) return
         _speedLimit.value = v
         if (_settings.value.announceSigns) jarvis.say("Tempolimit $v.", "sign$v", 20_000)
+    }
+
+    fun dismissCrash() {
+        crashReport.value = null
+        CrashGuard.clear()
     }
 
     fun clearLimit() {

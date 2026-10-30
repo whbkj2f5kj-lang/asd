@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -143,6 +144,36 @@ fun DashboardApp(vm: MainViewModel) {
         }
         if (cameraFull) FullscreenCamera(vm, camGranted, currentLimit, over, onClose = { cameraFull = false })
         if (showSettings) SettingsScreen(vm, onClose = { showSettings = false })
+        val crash by vm.crashReport.collectAsStateWithLifecycle()
+        crash?.let { (report, off) -> CrashScreen(report.text, off, onClose = { vm.dismissCrash() }) }
+    }
+}
+
+@Composable
+private fun CrashScreen(text: String, disabled: List<String>, onClose: () -> Unit) {
+    BackHandler(onBack = onClose)
+    Column(Modifier.fillMaxSize().background(J.bg).padding(20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Die App ist beim letzten Start abgestürzt", color = J.warn, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    if (disabled.isEmpty()) "Bitte diesen Bildschirm abfotografieren und an Claude schicken."
+                    else "Vorsichtshalber abgeschaltet: ${disabled.joinToString()}. Bitte abfotografieren und an Claude schicken.",
+                    color = J.dim,
+                    fontSize = 14.sp,
+                )
+            }
+            TextButton(onClick = onClose) { Text("WEITER", color = J.accent, fontSize = 16.sp) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text.lines().take(40).joinToString("\n"),
+            color = J.text,
+            fontSize = 12.sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(J.panel2).padding(12.dp)
+                .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+        )
     }
 }
 
@@ -385,7 +416,7 @@ private fun ScenePanel(
 
     Box(modifier.panel()) {
         // Kamera läuft immer (für die Erkennung), die Spuransicht liegt darüber
-        if (camGranted && cameraBound) {
+        if (camGranted && cameraBound && vm.settings.collectAsStateWithLifecycle().value.cameraEnabled) {
             CameraWithOverlay(vm, Modifier.fillMaxSize(), showHorizon = false, onClick = { if (showCamera) onExpand() })
         }
         if (!showCamera) {

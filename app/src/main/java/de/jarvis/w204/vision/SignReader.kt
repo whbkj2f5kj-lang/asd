@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import de.jarvis.w204.CrashGuard
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
@@ -17,7 +19,21 @@ data class SignBox(val l: Float, val t: Float, val r: Float, val b: Float, val v
  * Wert erst melden, wenn er mehrfach kurz hintereinander erkannt wurde.
  */
 class SignReader(private val onLimit: (Int) -> Unit) {
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private var recognizer: TextRecognizer? = null
+    private var initFailed = false
+    private var runs = 0
+
+    private fun client(): TextRecognizer? {
+        if (recognizer == null && !initFailed) {
+            recognizer = try {
+                CrashGuard.guard("ocr_init") { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+            } catch (t: Throwable) {
+                initFailed = true
+                null
+            }
+        }
+        return recognizer
+    }
     private val history = ArrayDeque<Pair<Long, Int>>()
 
     fun detect(full: Bitmap, px: IntArray, sw: Int, sh: Int, now: Long): List<SignBox> {
@@ -91,7 +107,7 @@ class SignReader(private val onLimit: (Int) -> Unit) {
     }
 
     fun close() {
-        runCatching { recognizer.close() }
+        runCatching { recognizer?.close() }
     }
 
     private fun readNumber(full: Bitmap, l: Float, t: Float, r: Float, b: Float): Int? {
@@ -106,8 +122,10 @@ class SignReader(private val onLimit: (Int) -> Unit) {
             val f = 160f / crop.width
             crop = Bitmap.createScaledBitmap(crop, 160, max(1, (crop.height * f).toInt()), true)
         }
+        val rec = client() ?: return null
         val text = try {
-            Tasks.await(recognizer.process(InputImage.fromBitmap(crop, 0)), 1500, TimeUnit.MILLISECONDS).text
+            val task = { Tasks.await(rec.process(InputImage.fromBitmap(crop, 0)), 1500, TimeUnit.MILLISECONDS).text }
+            if (runs++ < 3) CrashGuard.guard("ocr_run", task) else task()
         } catch (e: Exception) {
             return null
         }
