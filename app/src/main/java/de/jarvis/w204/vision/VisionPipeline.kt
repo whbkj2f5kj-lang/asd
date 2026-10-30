@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 class VisionPipeline(
     context: Context,
     private val onFrame: (VisionFrame) -> Unit,
-    onLimit: (Int) -> Unit,
+    onSign: (SignEvent) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     private val appContext = context.applicationContext
@@ -32,7 +32,7 @@ class VisionPipeline(
     private val _detectorError = MutableStateFlow<String?>(null)
     val detectorError: StateFlow<String?> = _detectorError
 
-    private val signs = SignReader(onLimit)
+    private val signs = SignReader(onSign)
     private val lanes = LaneDetector()
     private var vehicles: VehicleDetector? = null
     private var vehiclesTried = false
@@ -158,8 +158,7 @@ class VisionPipeline(
             val px = IntArray(sw * sh)
             small.getPixels(px, 0, sw, 0, 0, sw, sh)
 
-            val signBoxes = if (signsEnabled) signs.detect(bmp, px, sw, sh, now) else emptyList()
-
+            // Fahrzeuge zuerst: Tempo-Aufkleber auf Lkw sollen nicht als Schild zählen
             var objects: List<Detection> = emptyList()
             var laneResult = Lanes()
             if (objectsEnabled) {
@@ -169,6 +168,8 @@ class VisionPipeline(
                 }
                 laneResult = lanes.detect(px, sw, sh, calibration.horizon, now)
             }
+
+            val signBoxes = if (signsEnabled) signs.detect(bmp, px, sw, sh, now, objects) else emptyList()
 
             onFrame(VisionFrame(bmp.width, bmp.height, signBoxes, objects, laneResult))
         }

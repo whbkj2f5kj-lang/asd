@@ -18,6 +18,10 @@ class JarvisBrain(private val jarvis: Jarvis) {
     private var gapSince = 0L
     private var lastGreetAt = 0L
     private var hotSince = 0L
+    private var stoppedSince = 0L
+    private var stopLead: Float? = null
+    private var driveStart = 0L
+    private var lastMoving = 0L
     private var coolSince = 0L
     var regenActive = false
         private set
@@ -76,6 +80,30 @@ class JarvisBrain(private val jarvis: Jarvis) {
             else if (now - overSince > 2500) jarvis.say("Tempolimit $limit.", "over", 25_000)
         } else {
             overSince = 0L
+        }
+
+        // Vordermann fährt los: wir stehen, das Auto vor uns entfernt sich deutlich
+        val sp = s.speed
+        if (sp != null && sp == 0 && s.engineRunning) {
+            if (stoppedSince == 0L) { stoppedSince = now; stopLead = leadDistance }
+            val d0 = stopLead
+            if (d0 == null && leadDistance != null && now - stoppedSince < 3000) stopLead = leadDistance
+            if (d0 != null && d0 < 15f && leadDistance != null && leadDistance - d0 > 4f && now - stoppedSince > 3000) {
+                jarvis.say("Der Vordermann fährt los.", "lead_go", 30_000)
+                stopLead = leadDistance
+            }
+        } else {
+            stoppedSince = 0L
+            stopLead = null
+        }
+
+        // Pausenhinweis nach 2 Stunden Fahrt (kurze Stopps < 15 min zählen nicht als Pause)
+        if (sp != null && sp > 5) {
+            if (driveStart == 0L || now - lastMoving > 15 * 60_000L) driveStart = now
+            lastMoving = now
+            if (now - driveStart > 2 * 3600_000L) {
+                jarvis.say("Du fährst seit über zwei Stunden. Zeit für eine kurze Pause?", "pause", 3600_000L)
+            }
         }
 
         // DPF-Regeneration: Abgas vor dem Filter dauerhaft sehr heiß (normal < ~400 °C, Regeneration ~550–650 °C)

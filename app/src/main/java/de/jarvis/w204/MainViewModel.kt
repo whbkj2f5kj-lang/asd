@@ -109,7 +109,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _visionFrame.value = f
             _scene.value = sceneBuilder.update(f, _settings.value.calibration, SystemClock.elapsedRealtime())
         },
-        onLimit = { onLimitDetected(it) },
+        onSign = { onSignEvent(it) },
     )
 
     init {
@@ -181,22 +181,63 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             obd.status.map { it.state }.distinctUntilChanged().collect { st ->
                 if (st == ConnState.CONNECTED || st == ConnState.DEMO) brain.onSessionStart()
-                if (st == ConnState.IGNITION_OFF) _speedLimit.value = null
+                if (st == ConnState.IGNITION_OFF) { _speedLimit.value = null; limitNote.value = null; inTown = null }
             }
         }
 
         // Ansagen-Regeln bei jeder Änderung prüfen
         viewModelScope.launch {
             combine(obd.vehicle, obd.status, _speedLimit, _settings, _scene) { v, st, limit, s, scene ->
-                if (st.live) brain.evaluate(v, limit, s.tolerance, scene.leadDistance)
+                // "bei Nässe": ob es nass ist, weiß die App nicht -> keine Überschreitungswarnung
+                val effective = if (limitNote.value == "bei Nässe") null else limit
+                if (st.live) brain.evaluate(v, effective, s.tolerance, scene.leadDistance)
             }.collect()
         }
     }
 
-    private fun onLimitDetected(v: Int) {
-        if (_speedLimit.value == v) return
+    /** Zusatzinfo zum Limit: "bei Nässe", "7–17 h", "innerorts", "außerorts" … */
+    val limitNote = MutableStateFlow<String?>(null)
+    /** Innerhalb geschlossener Ortschaft (zuletzt Ortseingang gesehen)? */
+    @Volatile private var inTown: Boolean? = null
+
+    private fun setLimit(v: Int?, note: String?, say: String?) {
         _speedLimit.value = v
-        if (_settings.value.announceSigns) jarvis.say("Tempolimit $v.", "sign$v", 20_000)
+        limitNote.value = note
+        if (say != null && _settings.value.announceSigns) jarvis.say(say, "sign_${v}_$note", 20_000)
+    }
+
+    private fun onSignEvent(e: de.jarvis.w204.vision.SignEvent) {
+        when (e) {
+            is de.jarvis.w204.vision.SignEvent.Limit -> {
+                when {
+                    e.note == "Lkw" -> return                     // gilt nicht für Pkw
+                    e.note != null && !e.active -> return         // Uhrzeit passt gerade nicht
+                    _speedLimit.value == e.value && limitNote.value == e.note -> return
+                    e.note == "bei Nässe" -> setLimit(e.value, e.note, "Tempolimit ${e.value} bei Nässe.")
+                    e.note != null -> setLimit(e.value, e.note, "Tempolimit ${e.value}, ${e.note.replace("–", " bis ").replace(" h", " Uhr")}.")
+                    else -> setLimit(e.value, null, "Tempolimit ${e.value}.")
+                }
+            }
+            is de.jarvis.w204.vision.SignEvent.EndLimit, de.jarvis.w204.vision.SignEvent.EndAll -> {
+                // Nach der Aufhebung gilt wieder die allgemeine Regel
+                when (inTown) {
+                    true -> setLimit(50, "innerorts", "Ende der Begrenzung. Innerorts 50.")
+                    false -> setLimit(100, "außerorts", "Ende der Begrenzung. Außerorts 100.")
+                    null -> setLimit(null, null, if (e is de.jarvis.w204.vision.SignEvent.EndAll) "Ende aller Streckenverbote." else "Ende der Geschwindigkeitsbegrenzung.")
+                }
+            }
+            is de.jarvis.w204.vision.SignEvent.TownEntry -> {
+                if (inTown == true) return
+                inTown = true
+                val name = e.name?.let { " $it" } ?: ""
+                setLimit(50, "innerorts", "Ortseingang$name. 50.")
+            }
+            is de.jarvis.w204.vision.SignEvent.TownExit -> {
+                if (inTown == false) return
+                inTown = false
+                setLimit(100, "außerorts", "Ortsende. Außerorts 100.")
+            }
+        }
     }
 
     fun dismissCrash() {
@@ -205,6 +246,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearLimit() {
+        limitNote.value = null
         _speedLimit.value = null
     }
 

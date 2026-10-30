@@ -5,20 +5,36 @@ import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
-import de.jarvis.w204.CrashGuard
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import de.jarvis.w204.CrashGuard
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 /** Kandidat für ein Schild, Koordinaten normiert (0..1). */
-data class SignBox(val l: Float, val t: Float, val r: Float, val b: Float, val value: Int?)
+data class SignBox(val l: Float, val t: Float, val r: Float, val b: Float, val value: Int?, val label: String? = null)
+
+/** Was die Schildererkennung meldet (erst nach Bestätigung in mehreren Bildern). */
+sealed interface SignEvent {
+    val key: String
+
+    /** [note]: null, "bei Nässe", "Lkw" (gilt nicht für Pkw), "7–17 h" (zeitlich), [active] = gilt gerade */
+    data class Limit(val value: Int, val note: String? = null, val active: Boolean = true) : SignEvent {
+        override val key get() = "L$value|$note"
+    }
+    data class EndLimit(val value: Int?) : SignEvent { override val key get() = "E" }
+    data object EndAll : SignEvent { override val key get() = "EA" }
+    data class TownEntry(val name: String?) : SignEvent { override val key get() = "T" }
+    data class TownExit(val name: String?) : SignEvent { override val key get() = "X" }
+}
 
 /**
- * Tempolimit-Schilder (rund, roter Rand, helle Fläche, Zahl):
- * rote Ringe im verkleinerten Bild finden, Inneres offline mit ML Kit lesen,
- * Wert erst melden, wenn er mehrfach kurz hintereinander erkannt wurde.
+ * Schilder im Kamerabild:
+ *  • Tempolimit (roter Ring, Zahl) + Zusatzzeichen darunter (Nässe, Uhrzeit, Lkw)
+ *  • Aufhebung: Zeichen 278 (Ende Höchstgeschwindigkeit) und 282 (Ende aller Streckenverbote)
+ *  • Ortsschild Anfang/Ende (gelb; Ende mit rotem Schrägstrich)
+ * Runde Tempo-Aufkleber hinten auf Lkw werden ignoriert (liegen innerhalb einer Fahrzeug-Box).
  */
-class SignReader(private val onLimit: (Int) -> Unit) {
+class SignReader(private val onEvent: (SignEvent) -> Unit) {
     private var recognizer: TextRecognizer? = null
     private var initFailed = false
     private var runs = 0
@@ -34,75 +50,115 @@ class SignReader(private val onLimit: (Int) -> Unit) {
         }
         return recognizer
     }
-    private val history = ArrayDeque<Pair<Long, Int>>()
 
-    fun detect(full: Bitmap, px: IntArray, sw: Int, sh: Int, now: Long): List<SignBox> {
-        val n = sw * sh
-        val scanH = (sh * 0.8f).toInt()
-        val red = BooleanArray(n)
-        for (i in 0 until sw * scanH) red[i] = isRed(px[i])
+    private val history = ArrayDeque<Pair<Long, SignEvent>>()
+    private val lastEmit = HashMap<String, Long>()
 
-        val seen = BooleanArray(n)
-        val queue = IntArray(n)
-        val cands = ArrayList<IntArray>()
+    fun detect(
+        full: Bitmap, px: IntArray, sw: Int, sh: Int, now: Long,
+        vehicles: List<Detection> = emptyList(),
+        hour: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
+    ): List<SignBox> {
+        val rows = (sh * 0.8f).toInt()
+        val scale = full.width.toFloat() / sw
+        val boxes = ArrayList<SignBox>()
+        val events = ArrayList<SignEvent>()
 
-        for (start in 0 until sw * scanH) {
-            if (!red[start] || seen[start]) continue
-            var head = 0
-            var tail = 0
-            queue[tail++] = start
-            seen[start] = true
-            var minX = sw; var minY = sh; var maxX = 0; var maxY = 0; var count = 0
-            while (head < tail) {
-                val p = queue[head++]
-                val x = p % sw
-                val y = p / sw
-                count++
-                if (x < minX) minX = x
-                if (x > maxX) maxX = x
-                if (y < minY) minY = y
-                if (y > maxY) maxY = y
-                var q = p - 1
-                if (x > 0 && red[q] && !seen[q]) { seen[q] = true; queue[tail++] = q }
-                q = p + 1
-                if (x < sw - 1 && red[q] && !seen[q]) { seen[q] = true; queue[tail++] = q }
-                q = p - sw
-                if (y > 0 && red[q] && !seen[q]) { seen[q] = true; queue[tail++] = q }
-                q = p + sw
-                if (y < scanH - 1 && red[q] && !seen[q]) { seen[q] = true; queue[tail++] = q }
+        fun norm(bl: SignShapes.Blob) = floatArrayOf(
+            bl.minX * scale / full.width, bl.minY * scale / full.height,
+            (bl.maxX + 1) * scale / full.width, (bl.maxY + 1) * scale / full.height,
+        )
+        // Mitte der Box liegt in einem Auto/Lkw -> Aufkleber, kein Verkehrszeichen
+        fun onVehicle(n: FloatArray): Boolean {
+            val cx = (n[0] + n[2]) / 2f; val cy = (n[1] + n[3]) / 2f
+            return vehicles.any {
+                (it.kind == ObjKind.TRUCK || it.kind == ObjKind.CAR) && cx in it.l..it.r && cy in it.t..it.b
             }
-
-            val w = maxX - minX + 1
-            val h = maxY - minY + 1
-            if (count < 30 || w < 10 || h < 10 || w > sw / 3) continue
-            val aspect = w.toFloat() / h
-            if (aspect < 0.7f || aspect > 1.4f) continue
-            val fill = count.toFloat() / (w * h)
-            if (fill < 0.12f || fill > 0.62f) continue
-
-            val ix0 = minX + w * 3 / 10; val ix1 = maxX - w * 3 / 10
-            val iy0 = minY + h * 3 / 10; val iy1 = maxY - h * 3 / 10
-            var innerTotal = 0; var innerRed = 0; var innerBright = 0
-            for (yy in iy0..iy1) for (xx in ix0..ix1) {
-                val i = yy * sw + xx
-                innerTotal++
-                if (red[i]) innerRed++
-                if (brightness(px[i]) > 110) innerBright++
-            }
-            if (innerTotal == 0 || innerRed > innerTotal * 0.2f || innerBright < innerTotal * 0.25f) continue
-            cands += intArrayOf(minX, minY, maxX, maxY)
         }
 
-        val scale = full.width.toFloat() / sw
-        val boxes = cands
-            .sortedByDescending { (it[2] - it[0]) * (it[3] - it[1]) }
-            .take(3)
-            .map { c ->
-                val l = c[0] * scale; val t = c[1] * scale
-                val r = (c[2] + 1) * scale; val b = (c[3] + 1) * scale
-                SignBox(l / full.width, t / full.height, r / full.width, b / full.height, cachedRead(full, l, t, r, b, now))
+        // ---------- 1) rote Ringe: Tempolimits
+        val red = BooleanArray(sw * sh)
+        for (i in 0 until sw * rows) red[i] = SignShapes.isRed(px[i])
+        val rings = SignShapes.blobs(red, sw, rows).filter { bl ->
+            if (bl.w < 10 || bl.h < 10 || bl.w > sw / 3) return@filter false
+            if (bl.aspect < 0.7f || bl.aspect > 1.4f) return@filter false
+            if (bl.fill < 0.12f || bl.fill > 0.62f) return@filter false
+            val ix0 = bl.minX + bl.w * 3 / 10; val ix1 = bl.maxX - bl.w * 3 / 10
+            val iy0 = bl.minY + bl.h * 3 / 10; val iy1 = bl.maxY - bl.h * 3 / 10
+            var tot = 0; var rd = 0; var br = 0
+            for (yy in iy0..iy1) for (xx in ix0..ix1) {
+                val c = px[yy * sw + xx]
+                tot++
+                if (red[yy * sw + xx]) rd++
+                if (SignShapes.bright(c) > 110) br++
             }
-        confirm(now, boxes)
+            tot > 0 && rd <= tot * 0.2f && br >= tot * 0.25f
+        }.sortedByDescending { it.w * it.h }.take(3)
+
+        for (bl in rings) {
+            val n = norm(bl)
+            if (onVehicle(n)) { boxes += SignBox(n[0], n[1], n[2], n[3], null, "Fahrzeug"); continue }
+            val v = cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
+            var note: String? = null
+            var active = true
+            if (v != null) {
+                SignShapes.supplementBelow(px, sw, sh, bl)?.let { s ->
+                    val sn = floatArrayOf(s[0] * scale / full.width, s[1] * scale / full.height, (s[2] + 1) * scale / full.width, (s[3] + 1) * scale / full.height)
+                    val text = cachedText("Z", sn, now) { readText(full, sn, 0f) }
+                    if (text != null) {
+                        val sup = SignShapes.parseSupplement(text)
+                        when (sup.kind) {
+                            SignShapes.Supplement.Kind.WET -> note = "bei Nässe"
+                            SignShapes.Supplement.Kind.TRUCK -> note = "Lkw"
+                            SignShapes.Supplement.Kind.TIME -> {
+                                note = "${sup.fromH}–${sup.toH} h"
+                                active = SignShapes.timeActive(sup, hour)
+                            }
+                            SignShapes.Supplement.Kind.OTHER -> {}
+                        }
+                    }
+                }
+                events += SignEvent.Limit(v, note, active)
+            }
+            boxes += SignBox(n[0], n[1], n[2], n[3], v, note)
+        }
+
+        // ---------- 2) Aufhebungszeichen (weiß, schwarze Schrägstreifen)
+        val white = BooleanArray(sw * sh)
+        for (i in 0 until sw * rows) white[i] = SignShapes.isWhite(px[i])
+        val ringBoxes = rings.map { it }
+        val pieces = SignShapes.blobs(white, sw, rows, 8).filter { it.w <= sw / 3 && it.h <= rows / 2 }
+        SignShapes.merge(pieces, 2)
+            .filter { it.w in 10..(sw / 3) && it.aspect in 0.75f..1.33f && it.fill in 0.3f..0.9f }
+            // Innenfläche eines Tempolimit-Schilds ist kein Aufhebungszeichen
+            .filter { bl -> ringBoxes.none { r -> bl.minX >= r.minX - 2 && bl.maxX <= r.maxX + 2 && bl.minY >= r.minY - 2 && bl.maxY <= r.maxY + 2 } }
+            .sortedByDescending { it.count }
+            .take(4)
+            .forEach { bl ->
+                val kind = SignShapes.endSign(px, sw, bl) ?: return@forEach
+                val n = norm(bl)
+                if (onVehicle(n)) return@forEach
+                if (kind == SignShapes.EndKind.END_ALL) {
+                    events += SignEvent.EndAll
+                    boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende")
+                } else {
+                    val v = cached("E", n, now) { readNumber(full, n, inset = 0.14f) }
+                    events += SignEvent.EndLimit(v)
+                    boxes += SignBox(n[0], n[1], n[2], n[3], v, "Ende")
+                }
+            }
+
+        // ---------- 3) Ortsschilder
+        for (t in SignShapes.towns(px, sw, sh)) {
+            val n = norm(t.blob)
+            if (onVehicle(n)) continue
+            val text = cachedText(if (t.exit) "X" else "T", n, now) { readText(full, n, 0.05f) } ?: continue
+            val name = SignShapes.townName(text) ?: continue
+            events += if (t.exit) SignEvent.TownExit(name) else SignEvent.TownEntry(name)
+            boxes += SignBox(n[0], n[1], n[2], n[3], null, if (t.exit) "Ortsende" else name)
+        }
+
+        confirm(now, events)
         return boxes
     }
 
@@ -110,70 +166,87 @@ class SignReader(private val onLimit: (Int) -> Unit) {
         runCatching { recognizer?.close() }
     }
 
-    private data class Read(val l: Float, val t: Float, val r: Float, val b: Float, val value: Int?, val at: Long)
+    // ---------------------------------------------------------------- Bestätigung
+
+    /** Ein Ereignis zählt erst, wenn es ≥ 2× in 2,5 s gesehen wurde; danach 15 s Ruhe für dasselbe. */
+    private fun confirm(now: Long, events: List<SignEvent>) {
+        events.forEach { history.addLast(now to it) }
+        while (history.isNotEmpty() && now - history.first().first > 2500) history.removeFirst()
+        val counts = history.groupingBy { it.second.key }.eachCount()
+        for ((key, c) in counts) {
+            if (c < 2) continue
+            val last = lastEmit[key]
+            if (last != null && now - last < 15_000) continue
+            lastEmit[key] = now
+            onEvent(history.last { it.second.key == key }.second)
+        }
+    }
+
+    // ---------------------------------------------------------------- Texterkennung (mit Kurzzeit-Cache)
+
+    private data class Read(val tag: String, val box: FloatArray, val text: String?, val at: Long)
     private val recent = ArrayDeque<Read>()
 
-    private fun overlap(a: Read, l: Float, t: Float, r: Float, b: Float): Float {
-        val iw = (minOf(a.r, r) - maxOf(a.l, l)).coerceAtLeast(0f)
-        val ih = (minOf(a.b, b) - maxOf(a.t, t)).coerceAtLeast(0f)
+    private fun iou(a: FloatArray, b: FloatArray): Float {
+        val iw = (minOf(a[2], b[2]) - maxOf(a[0], b[0])).coerceAtLeast(0f)
+        val ih = (minOf(a[3], b[3]) - maxOf(a[1], b[1])).coerceAtLeast(0f)
         val inter = iw * ih
-        val union = (a.r - a.l) * (a.b - a.t) + (r - l) * (b - t) - inter
+        val union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
         return if (union <= 0f) 0f else inter / union
     }
 
-    /** Ergebnis wiederverwenden, wenn dasselbe Schild gerade (≤ 350 ms) schon gelesen wurde. */
-    private fun cachedRead(full: Bitmap, l: Float, t: Float, r: Float, b: Float, now: Long): Int? {
+    /** Ergebnis wiederverwenden, wenn dieselbe Stelle gerade (≤ 350 ms) schon gelesen wurde. */
+    private fun cachedText(tag: String, box: FloatArray, now: Long, read: () -> String?): String? {
         while (recent.isNotEmpty() && now - recent.first().at > 350) recent.removeFirst()
-        recent.firstOrNull { overlap(it, l, t, r, b) > 0.5f }?.let { return it.value }
-        val v = readNumber(full, l, t, r, b)
-        recent.addLast(Read(l, t, r, b, v, now))
-        return v
+        recent.firstOrNull { it.tag == tag && iou(it.box, box) > 0.5f }?.let { return it.text }
+        val t = read()
+        recent.addLast(Read(tag, box, t, now))
+        return t
     }
 
-    private fun readNumber(full: Bitmap, l: Float, t: Float, r: Float, b: Float): Int? {
-        val w = r - l
-        val h = b - t
-        val x0 = (l + w * 0.14f).toInt().coerceIn(0, full.width - 2)
-        val y0 = (t + h * 0.14f).toInt().coerceIn(0, full.height - 2)
-        val x1 = (r - w * 0.14f).toInt().coerceIn(x0 + 1, full.width)
-        val y1 = (b - h * 0.14f).toInt().coerceIn(y0 + 1, full.height)
+    private fun cached(tag: String, box: FloatArray, now: Long, read: () -> Int?): Int? =
+        cachedText(tag, box, now) { read()?.toString() }?.toIntOrNull()
+
+    private fun readText(full: Bitmap, n: FloatArray, inset: Float): String? {
+        val w = (n[2] - n[0]) * full.width
+        val h = (n[3] - n[1]) * full.height
+        val x0 = (n[0] * full.width + w * inset).toInt().coerceIn(0, full.width - 2)
+        val y0 = (n[1] * full.height + h * inset).toInt().coerceIn(0, full.height - 2)
+        val x1 = (n[2] * full.width - w * inset).toInt().coerceIn(x0 + 1, full.width)
+        val y1 = (n[3] * full.height - h * inset).toInt().coerceIn(y0 + 1, full.height)
         var crop = Bitmap.createBitmap(full, x0, y0, x1 - x0, y1 - y0)
         if (crop.width < 160) {
             val f = 160f / crop.width
             crop = Bitmap.createScaledBitmap(crop, 160, max(1, (crop.height * f).toInt()), true)
         }
         val rec = client() ?: return null
-        val text = try {
+        return try {
             val task = { Tasks.await(rec.process(InputImage.fromBitmap(crop, 0)), 1500, TimeUnit.MILLISECONDS).text }
             if (runs++ < 3) CrashGuard.guard("ocr_run", task) else task()
         } catch (e: Exception) {
-            return null
+            null
         }
-        val digits = text.uppercase()
-            .replace('O', '0').replace('D', '0').replace('Q', '0')
-            .replace('I', '1').replace('L', '1')
-            .replace(Regex("[^0-9]"), "")
-        val v = digits.toIntOrNull() ?: return null
-        return v.takeIf { it in VALID_LIMITS }
     }
 
-    private fun confirm(now: Long, boxes: List<SignBox>) {
-        boxes.firstNotNullOfOrNull { it.value }?.let { history.addLast(now to it) }
-        while (history.isNotEmpty() && now - history.first().first > 2500) history.removeFirst()
-        val best = history.groupingBy { it.second }.eachCount().maxByOrNull { it.value } ?: return
-        if (best.value >= 2) onLimit(best.key)
+    private fun readNumber(full: Bitmap, n: FloatArray, inset: Float): Int? {
+        val text = readText(full, n, inset) ?: return null
+        return digitsToLimit(text)
     }
-
-    private fun isRed(c: Int): Boolean {
-        val r = (c shr 16) and 0xFF
-        val g = (c shr 8) and 0xFF
-        val b = c and 0xFF
-        return r > 70 && r * 10 > g * 17 && r * 10 > b * 15
-    }
-
-    private fun brightness(c: Int): Int = (((c shr 16) and 0xFF) + ((c shr 8) and 0xFF) + (c and 0xFF)) / 3
 
     companion object {
-        private val VALID_LIMITS = setOf(10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130)
+        private val VALID_LIMITS = setOf(5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130)
+
+        /** OCR-Text in ein gültiges Tempolimit wandeln (verwechselte Buchstaben korrigieren). */
+        fun digitsToLimit(text: String): Int? {
+            val digits = text.uppercase()
+                .replace('O', '0').replace('D', '0').replace('Q', '0')
+                .replace('I', '1').replace('L', '1').replace('S', '5').replace('B', '8')
+                .replace(Regex("[^0-9]"), "")
+            if (digits.isEmpty()) return null
+            digits.toIntOrNull()?.takeIf { it in VALID_LIMITS }?.let { return it }
+            // häufige Fehllesungen: "800" (Rand als 0 gelesen) -> 80, "1100" -> 110
+            if (digits.length >= 3) digits.dropLast(1).toIntOrNull()?.takeIf { it in VALID_LIMITS }?.let { return it }
+            return null
+        }
     }
 }

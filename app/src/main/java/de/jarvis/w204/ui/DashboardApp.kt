@@ -126,7 +126,8 @@ fun DashboardApp(vm: MainViewModel) {
 
     val currentLimit = limit
     val speed = vehicle.speed
-    val over = currentLimit != null && speed != null && speed > currentLimit + settings.tolerance
+    val limitNote by vm.limitNote.collectAsStateWithLifecycle()
+    val over = currentLimit != null && speed != null && limitNote != "bei Nässe" && speed > currentLimit + settings.tolerance
 
     val clock = rememberClock()
     androidx.compose.runtime.CompositionLocalProvider(
@@ -496,7 +497,19 @@ private fun ScenePanel(
             LaneView(scene, speed, gapColor, Modifier.fillMaxSize(), transparent = !framed)
         }
 
-        SpeedLimitSign(limit, over, Modifier.align(Alignment.TopStart).padding(14.dp).size(62.dp).clickable { vm.clearLimit() })
+        Column(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            SpeedLimitSign(limit, over, Modifier.size(62.dp).clickable { vm.clearLimit() })
+            val note by vm.limitNote.collectAsStateWithLifecycle()
+            note?.let {
+                Text(
+                    it,
+                    color = Color.Black,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(4.dp)).background(Color.White).padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
 
         if (lead != null) {
             Column(Modifier.align(Alignment.TopEnd).padding(16.dp), horizontalAlignment = Alignment.End) {
