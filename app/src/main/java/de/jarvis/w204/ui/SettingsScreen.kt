@@ -242,6 +242,29 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Hint("Erkennt runde Tempolimit-Schilder (10–130). Nur als Hinweis – es gilt immer die echte Beschilderung.")
 
                     Spacer(Modifier.height(12.dp))
+                    Section("Tempolimits aus Karte (GPS)")
+                    val ms by vm.map.state.collectAsStateWithLifecycle()
+                    SwitchRow("Tempolimits aus OpenStreetMap", settings.mapLimits) { on -> vm.update { it.copy(mapLimits = on) } }
+                    if (settings.mapLimits) {
+                        Hint(buildString {
+                            append(ms.gps)
+                            if (ms.running) append(" · ${ms.tiles} Kartenstücke" + if (ms.loading) " (lade …)" else "")
+                        })
+                        if (ms.hasFix) Hint(
+                            "Straße: " + (ms.road ?: "nicht zugeordnet") + " · " + when {
+                                ms.limit == null -> "kein Limit eingetragen"
+                                ms.limit!!.none -> "ohne Limit"
+                                ms.limit!!.kmh != null -> "${ms.limit!!.kmh} km/h" + (if (ms.limit!!.estimated) " (geschätzt)" else "") + (ms.limit!!.note?.let { " $it" } ?: "")
+                                else -> "Wechselverkehrszeichen"
+                            }
+                        )
+                        ms.error?.let { Hint("⚠ $it – bereits geladene Strecken funktionieren weiter.") }
+                        TextButton(onClick = { vm.map.clearCache() }) { Text("Kartenspeicher leeren", color = J.accent) }
+                    }
+                    Hint("Kamera-Schilder haben Vorrang. Nach dem Abbiegen oder wenn laut Karte ein neuer Abschnitt beginnt, gilt wieder die Karte. Geschätzte Werte (≈) lösen keine Warnung aus. Daten werden für ~2×2 km geladen und 30 Tage gespeichert.")
+                    Hint("Kartendaten © OpenStreetMap-Mitwirkende (ODbL)")
+
+                    Spacer(Modifier.height(12.dp))
                     Section("Reifendruck (TPMS)")
                     SwitchRow("USB-Empfänger verwenden", settings.tpms) { on -> vm.update { it.copy(tpms = on) } }
                     Hint(tpmsStatus.message + (tpmsStatus.device?.let { " · $it" } ?: "") +

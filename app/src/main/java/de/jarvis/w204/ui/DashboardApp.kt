@@ -86,6 +86,8 @@ fun hasPermission(c: Context, p: String) =
 fun requiredPermissions(): Array<String> = buildList {
     add(Manifest.permission.CAMERA)
     add(Manifest.permission.RECORD_AUDIO)
+    add(Manifest.permission.ACCESS_FINE_LOCATION)
+    add(Manifest.permission.ACCESS_COARSE_LOCATION)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)
 }.toTypedArray()
 
@@ -114,7 +116,7 @@ fun DashboardApp(vm: MainViewModel) {
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         camGranted = hasPermission(context, Manifest.permission.CAMERA)
-        vm.connectIfIdle()
+        vm.onPermissions()
     }
     LaunchedEffect(Unit) { launcher.launch(requiredPermissions()) }
 
@@ -127,7 +129,8 @@ fun DashboardApp(vm: MainViewModel) {
     val currentLimit = limit
     val speed = vehicle.speed
     val limitNote by vm.limitNote.collectAsStateWithLifecycle()
-    val over = currentLimit != null && speed != null && limitNote != "bei Nässe" && speed > currentLimit + settings.tolerance
+    val warnLimit by vm.warnLimit.collectAsStateWithLifecycle()
+    val over = warnLimit != null && speed != null && speed > warnLimit!! + settings.tolerance
 
     val clock = rememberClock()
     androidx.compose.runtime.CompositionLocalProvider(

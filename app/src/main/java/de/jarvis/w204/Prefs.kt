@@ -27,6 +27,8 @@ data class Settings(
     val camHeight: Float = 1.25f,
     val camFov: Float = 90f,
     val horizon: Float = 0.5f,
+    /** Tempolimits aus OpenStreetMap (GPS) */
+    val mapLimits: Boolean = true,
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -55,6 +57,7 @@ class Prefs(context: Context) {
         camHeight = sp.getFloat("camH", 1.25f),
         camFov = sp.getFloat("camFov", 90f),
         horizon = sp.getFloat("horizon", 0.5f),
+        mapLimits = sp.getBoolean("mapLim", true),
     )
 
     fun save(s: Settings) {
@@ -78,6 +81,7 @@ class Prefs(context: Context) {
             .putInt("cam", s.cameraIndex)
             .putFloat("camH", s.camHeight)
             .putFloat("camFov", s.camFov)
+            .putBoolean("mapLim", s.mapLimits)
             .putFloat("horizon", s.horizon)
             .apply()
     }

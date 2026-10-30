@@ -29,6 +29,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val obd = ObdManager(app, viewModelScope)
     val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
     val tpms = de.jarvis.w204.tpms.TpmsManager(app, viewModelScope)
+    val map = de.jarvis.w204.map.MapLimits(app, viewModelScope)
 
     /** 0 = ok/keine Daten, 1 = Druck niedrig/Batterie, 2 = Luftverlust */
     fun tireLevel(t: de.jarvis.w204.tpms.TireState, s: Settings): Int {
@@ -83,6 +84,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _speedLimit = MutableStateFlow<Int?>(null)
     val speedLimit: StateFlow<Int?> = _speedLimit
+
+    /** Zusatzinfo zum Limit: "bei Nässe", "7–17 h", "innerorts", "Karte" … */
+    val limitNote = MutableStateFlow<String?>(null)
+    /** Limit, bei dessen Überschreitung gewarnt wird (ohne Nässe-Limits und geschätzte Kartenwerte) */
+    private val _warnLimit = MutableStateFlow<Int?>(null)
+    val warnLimit: StateFlow<Int?> = _warnLimit
+    /** 0 = keins, 1 = Kamera, 2 = Karte */
+    val limitSource = MutableStateFlow(0)
+    /** Innerhalb geschlossener Ortschaft? (Kamera: Ortsschild, sonst Karte) */
+    @Volatile private var inTown: Boolean? = null
+    @Volatile private var townSeenAt = 0L
+
+    /** Von der Kamera erkanntes Limit + auf welcher Straße (laut Karte) es gesehen wurde */
+    private data class CamLimit(val value: Int?, val note: String?, val road: String?, val mapKmh: Int?, val mapNone: Boolean, val at: Long)
+    private var cam: CamLimit? = null
+    private val limitLock = Any()
 
     private val _visionFrame = MutableStateFlow<VisionFrame?>(null)
     val visionFrame: StateFlow<VisionFrame?> = _visionFrame
@@ -181,29 +198,84 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             obd.status.map { it.state }.distinctUntilChanged().collect { st ->
                 if (st == ConnState.CONNECTED || st == ConnState.DEMO) brain.onSessionStart()
-                if (st == ConnState.IGNITION_OFF) { _speedLimit.value = null; limitNote.value = null; inTown = null }
+                if (st == ConnState.IGNITION_OFF) { synchronized(limitLock) { cam = null; inTown = null }; recompute() }
             }
         }
 
         // Ansagen-Regeln bei jeder Änderung prüfen
         viewModelScope.launch {
-            combine(obd.vehicle, obd.status, _speedLimit, _settings, _scene) { v, st, limit, s, scene ->
-                // "bei Nässe": ob es nass ist, weiß die App nicht -> keine Überschreitungswarnung
-                val effective = if (limitNote.value == "bei Nässe") null else limit
-                if (st.live) brain.evaluate(v, effective, s.tolerance, scene.leadDistance)
+            combine(obd.vehicle, obd.status, _warnLimit, _settings, _scene) { v, st, limit, s, scene ->
+                if (st.live) brain.evaluate(v, limit, s.tolerance, scene.leadDistance)
             }.collect()
         }
+
+        // Kartenlimit bei jeder neuen GPS-Position einrechnen
+        viewModelScope.launch { map.state.collect { recompute() } }
     }
 
-    /** Zusatzinfo zum Limit: "bei Nässe", "7–17 h", "innerorts", "außerorts" … */
-    val limitNote = MutableStateFlow<String?>(null)
-    /** Innerhalb geschlossener Ortschaft (zuletzt Ortseingang gesehen)? */
-    @Volatile private var inTown: Boolean? = null
 
     private fun setLimit(v: Int?, note: String?, say: String?) {
-        _speedLimit.value = v
-        limitNote.value = note
-        if (say != null && _settings.value.announceSigns) jarvis.say(say, "sign_${v}_$note", 20_000)
+        val shownBefore = _speedLimit.value
+        synchronized(limitLock) {
+            val ms = map.state.value
+            val m = if (_settings.value.mapLimits && ms.hasFix) ms.limit else null
+            cam = CamLimit(v, note, if (ms.hasFix) ms.roadKey else null, m?.kmh, m?.none == true, SystemClock.elapsedRealtime())
+        }
+        recompute()
+        // gleiches Limit wie schon angezeigt (z. B. aus der Karte) -> nicht nochmal ansagen
+        if (say != null && _settings.value.announceSigns && shownBefore != v) jarvis.say(say, "sign_${v}_$note", 20_000)
+    }
+
+    /**
+     * Kamera hat Vorrang. Ihr Limit gilt, bis man auf eine andere Straße abbiegt oder die Karte
+     * später einen neuen Abschnitt meldet. Danach (oder ohne Schild) gilt die Karte.
+     */
+    private fun recompute() = synchronized(limitLock) {
+        val now = SystemClock.elapsedRealtime()
+        val ms = map.state.value
+        val m = if (_settings.value.mapLimits && ms.hasFix) ms.limit else null
+        val key = if (ms.hasFix) ms.roadKey else null
+
+        if (m?.urban != null && now - townSeenAt > 60_000) inTown = m.urban
+
+        var c = cam
+        if (c != null && key != null) {
+            val mapChanged = m?.kmh != c.mapKmh || (m?.none == true) != c.mapNone
+            c = when {
+                c.road == null -> c.copy(road = key, mapKmh = m?.kmh, mapNone = m?.none == true)
+                c.road != key && now - c.at > 5_000 -> null                   // abgebogen
+                mapChanged && now - c.at <= 30_000 -> c.copy(mapKmh = m?.kmh, mapNone = m?.none == true) // Kartenabschnitt beginnt etwas versetzt
+                mapChanged -> null                                            // neuer Abschnitt laut Karte
+                else -> c
+            }
+            cam = c
+        }
+
+        when {
+            c != null -> {
+                _speedLimit.value = c.value
+                limitNote.value = c.note
+                limitSource.value = 1
+                _warnLimit.value = if (c.note == "bei Nässe") null else c.value
+            }
+            m != null && (m.kmh != null || m.none) -> {
+                _speedLimit.value = m.kmh
+                limitNote.value = when {
+                    m.none -> "frei · Karte"
+                    m.note != null -> m.note
+                    m.estimated -> "≈ Karte"
+                    else -> "Karte"
+                }
+                limitSource.value = 2
+                _warnLimit.value = if (m.estimated) null else m.kmh
+            }
+            else -> {
+                _speedLimit.value = null
+                limitNote.value = if (m?.variable == true) "Wechselzeichen" else null
+                limitSource.value = 0
+                _warnLimit.value = null
+            }
+        }
     }
 
     private fun onSignEvent(e: de.jarvis.w204.vision.SignEvent) {
@@ -212,7 +284,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 when {
                     e.note == "Lkw" -> return                     // gilt nicht für Pkw
                     e.note != null && !e.active -> return         // Uhrzeit passt gerade nicht
-                    _speedLimit.value == e.value && limitNote.value == e.note -> return
+                    limitSource.value == 1 && _speedLimit.value == e.value && limitNote.value == e.note -> return
                     e.note == "bei Nässe" -> setLimit(e.value, e.note, "Tempolimit ${e.value} bei Nässe.")
                     e.note != null -> setLimit(e.value, e.note, "Tempolimit ${e.value}, ${e.note.replace("–", " bis ").replace(" h", " Uhr")}.")
                     else -> setLimit(e.value, null, "Tempolimit ${e.value}.")
@@ -227,13 +299,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             is de.jarvis.w204.vision.SignEvent.TownEntry -> {
-                if (inTown == true) return
+                townSeenAt = SystemClock.elapsedRealtime()
+                if (inTown == true && limitSource.value == 1) return
                 inTown = true
                 val name = e.name?.let { " $it" } ?: ""
                 setLimit(50, "innerorts", "Ortseingang$name. 50.")
             }
             is de.jarvis.w204.vision.SignEvent.TownExit -> {
-                if (inTown == false) return
+                townSeenAt = SystemClock.elapsedRealtime()
+                if (inTown == false && limitSource.value == 1) return
                 inTown = false
                 setLimit(100, "außerorts", "Ortsende. Außerorts 100.")
             }
@@ -245,9 +319,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         CrashGuard.clear()
     }
 
+    /** Antippen des Schilds: Kamera-Limit verwerfen (danach gilt wieder die Karte) */
     fun clearLimit() {
-        limitNote.value = null
-        _speedLimit.value = null
+        synchronized(limitLock) { cam = null }
+        recompute()
+    }
+
+    /** Nach der Berechtigungsabfrage: GPS ggf. jetzt starten */
+    fun onPermissions() {
+        applyRuntime(_settings.value)
+        connectIfIdle()
     }
 
     fun connect() {
@@ -275,6 +356,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         vision.signsEnabled = s.signRecognition
         vision.objectsEnabled = s.objectRecognition
         vision.calibration = s.calibration
+        if (s.mapLimits) map.start() else map.stop()
+        recompute()
         if (!s.objectRecognition) _scene.value = Scene()
     }
 
@@ -296,11 +379,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             jarvis.say(faultSummary(diag.value.result))
             return
         }
+        if (listOf("tempo", "limit", "schnell darf", "begrenzung", "schild").any { it in q }) {
+            val l = _speedLimit.value
+            val road = map.state.value.road?.let { " auf $it" } ?: ""
+            jarvis.say(when {
+                limitSource.value == 1 && l != null -> "Tempolimit $l, von der Kamera erkannt."
+                limitSource.value == 2 && l != null -> "Laut Karte gilt$road Tempo $l" + (if (limitNote.value == "≈ Karte") ", geschätzt." else ".")
+                limitSource.value == 2 -> "Laut Karte gilt$road kein Tempolimit."
+                else -> "Ich kenne gerade kein Tempolimit."
+            })
+            return
+        }
         jarvis.say(brain.answer(text, obd.vehicle.value, _speedLimit.value, _scene.value.leadDistance))
     }
 
     override fun onCleared() {
         tpms.release()
+        map.stop()
         obd.stop()
         jarvis.shutdown()
         vision.close()
