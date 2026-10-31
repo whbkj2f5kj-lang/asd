@@ -42,7 +42,8 @@ jobs:
         run: |
           set -o pipefail
           pip install -q tensorflow-cpu==2.16.1 pillow numpy huggingface_hub pyarrow
-          python ml/train_signs.py 2>&1 | tee train.log
+          export TF_CPP_MIN_LOG_LEVEL=2
+          python -u ml/train_signs.py 2>&1 | tee train.log
 
       - name: APK bauen
         shell: bash
@@ -58,7 +59,7 @@ jobs:
             grep -E "^e: |error:|What went wrong|Could not|^> [^T]|Caused by|FAILED|Error|expected|tests completed" build.log | head -80 > errors.txt || true
             [ -s errors.txt ] || tail -60 build.log > errors.txt
           else
-            tail -40 train.log > errors.txt 2>/dev/null || echo "Fehler vor dem Build" > errors.txt
+            grep -vE "tensorflow/core|oneDNN|cpu_feature|To enable the following|rebuild TensorFlow|^\s*$" train.log | tail -40 > errors.txt 2>/dev/null || echo "Fehler vor dem Build" > errors.txt
           fi
           msg=$(sed -e 's/%/%25/g' errors.txt | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Build-Fehler::$msg"
