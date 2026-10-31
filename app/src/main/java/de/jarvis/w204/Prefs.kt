@@ -29,6 +29,12 @@ data class Settings(
     val horizon: Float = 0.5f,
     /** Tempolimits aus OpenStreetMap (GPS) */
     val mapLimits: Boolean = true,
+    /** Dashcam */
+    val dashcam: Boolean = false,
+    val dashcamLoop: Int = 3,
+    val dashcamOverlay: Boolean = true,
+    val dashcamAutoSave: Boolean = true,
+    val dashcamVolume: String = "external_primary",
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -58,6 +64,11 @@ class Prefs(context: Context) {
         camFov = sp.getFloat("camFov", 90f),
         horizon = sp.getFloat("horizon", 0.5f),
         mapLimits = sp.getBoolean("mapLim", true),
+        dashcam = sp.getBoolean("dc", false),
+        dashcamLoop = sp.getInt("dcLoop", 3),
+        dashcamOverlay = sp.getBoolean("dcOver", true),
+        dashcamAutoSave = sp.getBoolean("dcAuto", true),
+        dashcamVolume = sp.getString("dcVol", "external_primary") ?: "external_primary",
     )
 
     fun save(s: Settings) {
@@ -82,6 +93,11 @@ class Prefs(context: Context) {
             .putFloat("camH", s.camHeight)
             .putFloat("camFov", s.camFov)
             .putBoolean("mapLim", s.mapLimits)
+            .putBoolean("dc", s.dashcam)
+            .putInt("dcLoop", s.dashcamLoop)
+            .putBoolean("dcOver", s.dashcamOverlay)
+            .putBoolean("dcAuto", s.dashcamAutoSave)
+            .putString("dcVol", s.dashcamVolume)
             .putFloat("horizon", s.horizon)
             .apply()
     }

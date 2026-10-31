@@ -153,6 +153,7 @@ fun DashboardApp(vm: MainViewModel) {
                     tireSummary(vm, tires, settings).first else null,
                 tireLevel = tireSummary(vm, tires, settings).second,
                 onTires = { showTires = true },
+                extra = { DashcamButton(vm) },
             ) {
                 ScenePanel(
                     vm = vm,
@@ -172,7 +173,7 @@ fun DashboardApp(vm: MainViewModel) {
             }
         } else Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
             TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true },
-                faults = faults, faultSeverity = faultSeverity, onDiagnose = { showDiagnose = true })
+                faults = faults, faultSeverity = faultSeverity, onDiagnose = { showDiagnose = true }, extra = { DashcamButton(vm) })
             Spacer(Modifier.height(10.dp))
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DrivePanel(vehicle, Modifier.weight(1.05f).fillMaxHeight())
@@ -243,6 +244,7 @@ private fun TopBar(
     faults: Int,
     faultSeverity: Int,
     onDiagnose: () -> Unit,
+    extra: @Composable () -> Unit = {},
 ) {
     var showMessage by remember { mutableStateOf(false) }
     LaunchedEffect(message) {
@@ -274,6 +276,8 @@ private fun TopBar(
         Spacer(Modifier.width(16.dp))
         Clock()
         Spacer(Modifier.width(12.dp))
+        extra()
+        Spacer(Modifier.width(10.dp))
         DiagButton(faults, faultSeverity, onDiagnose)
         Spacer(Modifier.width(10.dp))
         MicButton(listening, onMic)

@@ -258,6 +258,9 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Hint("Erkennt runde Tempolimit-Schilder (10–130). Nur als Hinweis – es gilt immer die echte Beschilderung.")
 
                     Spacer(Modifier.height(12.dp))
+                    DashcamSettings(vm)
+
+                    Spacer(Modifier.height(12.dp))
                     Section("Tempolimits aus Karte (GPS)")
                     val ms by vm.map.state.collectAsStateWithLifecycle()
                     SwitchRow("Tempolimits aus OpenStreetMap", settings.mapLimits) { on -> vm.update { it.copy(mapLimits = on) } }

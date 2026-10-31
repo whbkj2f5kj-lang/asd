@@ -28,6 +28,8 @@ class VisionPipeline(
     @Volatile var signsEnabled = true
     @Volatile var objectsEnabled = true
     @Volatile var calibration = Calibration()
+    /** Dashcam bekommt jedes Kamerabild, das sie haben möchte */
+    @Volatile var recorder: de.jarvis.w204.dashcam.Dashcam? = null
 
     private val _detectorError = MutableStateFlow<String?>(null)
     val detectorError: StateFlow<String?> = _detectorError
@@ -63,8 +65,9 @@ class VisionPipeline(
         try {
             val now = SystemClock.elapsedRealtime()
             val showPreview = now - lastPreview >= previewInterval
+            val rec = recorder?.takeIf { it.wantsFrame() }
             val analyse = !procBusy.get() && due()
-            if (!showPreview && !analyse) return
+            if (!showPreview && !analyse && rec == null) return
             val t0 = SystemClock.elapsedRealtime()
             var bmp = image.toBitmap()
             // Manche Radios liefern krumme Werte (z. B. 359°) – auf 0/90/180/270 runden
@@ -79,6 +82,7 @@ class VisionPipeline(
                 lastPreview = now
                 _preview.value = bmp.asImageBitmap()
             }
+            rec?.offer(bmp)
             if (analyse) {
                 procBusy.set(true)
                 val frame = bmp
@@ -107,7 +111,9 @@ class VisionPipeline(
      * Nur kopieren, wenn wir es auch auswerten; die Auswertung läuft im eigenen Thread.
      */
     fun submitRgbx(frame: ByteBuffer, width: Int, height: Int) {
-        if (usbBusy.get() || !due()) return
+        val rec = recorder?.takeIf { it.wantsFrame() }
+        val analyse = !usbBusy.get() && due()
+        if (!analyse && rec == null) return
         if (frame.remaining() < width * height * 4) return
         val bmp = try {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { b ->
@@ -118,6 +124,8 @@ class VisionPipeline(
             Log.w(TAG, "USB-Bild nicht lesbar", t)
             return
         }
+        rec?.offer(bmp)
+        if (!analyse) return
         usbBusy.set(true)
         usbExecutor.execute {
             try {

@@ -81,6 +81,7 @@ fun ModernCluster(
     tireText: String? = null,
     tireLevel: Int = -1,
     onTires: () -> Unit = {},
+    extra: @Composable () -> Unit = {},
     center: @Composable BoxScope.() -> Unit,
 ) {
     BoxWithConstraints(
@@ -97,6 +98,8 @@ fun ModernCluster(
             ) {
                 StatusChip(status, onClick = onSettings)
                 Spacer(Modifier.weight(1f))
+                extra()
+                Spacer(Modifier.width(10.dp))
                 DiagButton(faults, faultSeverity, onDiagnose)
                 Spacer(Modifier.width(10.dp))
                 MicButton(listening, onMic)

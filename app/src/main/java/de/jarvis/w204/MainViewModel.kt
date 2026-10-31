@@ -30,6 +30,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
     val tpms = de.jarvis.w204.tpms.TpmsManager(app, viewModelScope)
     val map = de.jarvis.w204.map.MapLimits(app, viewModelScope)
+    val dashcam = de.jarvis.w204.dashcam.Dashcam(app, viewModelScope)
 
     /** 0 = ok/keine Daten, 1 = Druck niedrig/Batterie, 2 = Luftverlust */
     fun tireLevel(t: de.jarvis.w204.tpms.TireState, s: Settings): Int {
@@ -166,8 +167,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             crashReport.value = report to off
         }
+        vision.recorder = dashcam
+        dashcam.overlayText = {
+            val v = obd.vehicle.value
+            listOfNotNull(v.speed?.let { "$it km/h" }, _speedLimit.value?.let { "Limit $it" }).joinToString("   ")
+        }
         applyRuntime(_settings.value)
         if (_settings.value.tpms) tpms.start()
+
+        // Dashcam: starke Bremsung -> Video automatisch sichern
+        viewModelScope.launch {
+            val hist = ArrayDeque<Pair<Long, Int>>()
+            var lastEvent = 0L
+            obd.vehicle.collect { v ->
+                val sp = v.speed ?: return@collect
+                val now = SystemClock.elapsedRealtime()
+                hist.addLast(now to sp)
+                while (hist.isNotEmpty() && now - hist.first().first > 1500) hist.removeFirst()
+                val peak = hist.maxOf { it.second }
+                // ≥ 30 km/h Geschwindigkeitsverlust in ≤ 1,5 s (≈ 5,5 m/s², deutlich mehr als normales Bremsen)
+                if (_settings.value.dashcam && _settings.value.dashcamAutoSave && peak >= 35 && peak - sp >= 30 && now - lastEvent > 20_000) {
+                    lastEvent = now
+                    dashcam.protect("Starke Bremsung")
+                    jarvis.say("Video gesichert.", "dc_brake", 20_000)
+                }
+            }
+        }
 
         // Reifendruck-Warnungen
         viewModelScope.launch {
@@ -198,7 +223,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             obd.status.map { it.state }.distinctUntilChanged().collect { st ->
                 if (st == ConnState.CONNECTED || st == ConnState.DEMO) brain.onSessionStart()
-                if (st == ConnState.IGNITION_OFF) { synchronized(limitLock) { cam = null; inTown = null }; recompute() }
+                if (st == ConnState.IGNITION_OFF) { synchronized(limitLock) { cam = null; inTown = null }; recompute(); dashcam.flush() }
             }
         }
 
@@ -357,12 +382,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         vision.objectsEnabled = s.objectRecognition
         vision.calibration = s.calibration
         if (s.mapLimits) map.start() else map.stop()
+        dashcam.configure(de.jarvis.w204.dashcam.Dashcam.Config(s.dashcam, s.dashcamLoop, s.dashcamOverlay, s.dashcamVolume))
         recompute()
         if (!s.objectRecognition) _scene.value = Scene()
     }
 
+    /** Dashcam-Knopf: aus -> einschalten, an -> aktuelles Video sichern */
+    fun dashcamTap() {
+        if (!_settings.value.dashcam) {
+            update { it.copy(dashcam = true) }
+            jarvis.say("Dashcam an.")
+        } else {
+            dashcam.protect("Manuell")
+            jarvis.say("Video gesichert.", "dc_manual", 3000)
+        }
+    }
+
     fun onVoiceQuery(text: String) {
         val q = text.lowercase(java.util.Locale.GERMAN)
+        if (listOf("video", "dashcam", "aufnahme", "sichern", "speicher das").any { it in q }) {
+            when {
+                listOf("aus", "stopp", "beenden").any { Regex("\\b$it\\b").containsMatchIn(q) } -> {
+                    update { it.copy(dashcam = false) }; jarvis.say("Dashcam aus.")
+                }
+                !_settings.value.dashcam -> { update { it.copy(dashcam = true) }; jarvis.say("Dashcam an.") }
+                else -> { dashcam.protect("Sprachbefehl"); jarvis.say("Video gesichert.") }
+            }
+            return
+        }
         if (listOf("reifen", "luftdruck", "reifendruck").any { it in q }) {
             val t = tpms.tires.value.values.filter { it.wheel != de.jarvis.w204.tpms.Wheel.SPARE && !it.noSignal }
             if (t.isEmpty()) { jarvis.say("Ich habe noch keine Reifendaten."); return }
@@ -396,6 +443,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         tpms.release()
         map.stop()
+        dashcam.flush()
         obd.stop()
         jarvis.shutdown()
         vision.close()
