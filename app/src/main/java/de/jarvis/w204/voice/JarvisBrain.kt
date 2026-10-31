@@ -161,6 +161,8 @@ class JarvisBrain(private val jarvis: Jarvis) {
         return when {
             has("außen", "aussen", "draußen", "draussen") ->
                 s.ambient?.let { "Draußen sind es $it Grad." } ?: "Die Außentemperatur liefert dein Steuergerät nicht."
+            has("öl", "oel") ->
+                s.oilTemp?.let { "Das Motoröl hat $it Grad." } ?: "Die Öltemperatur liefert dein Motorsteuergerät leider nicht als Standardwert."
             has("ladeluft", "ansaug") ->
                 s.intakeTemp?.let { "Die Ladeluft hat $it Grad." } ?: noData
             has("temperatur", "kühlmittel", "kuehlmittel", "warm", "kalt") ->

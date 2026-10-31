@@ -287,6 +287,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
     fun reset() {
         if (job?.isActive == true || recJob?.isActive == true) return
         hits.clear()
+        locked.clear()
         idents.clear()
         rows.clear()
         prefs.edit().clear().apply()
@@ -350,6 +351,8 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
     // ---------- Adapter-Test: wer antwortet wirklich? (Kopfzeilen an -> Absender-ID sichtbar)
 
     private val testLog = mutableListOf<String>()
+    /** Nummern, die es gibt, die aber gesperrt sind (Schlüssel -> Absage-Code + Sitzung) */
+    private val locked = LinkedHashMap<String, String>()
 
     fun adapterTest() = run("Adapter-Test läuft …") {
         val log = mutableListOf<String>()
@@ -467,6 +470,12 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                         is DiagParser.Reply.Negative -> {
                             answered = true
                             if (rep.nrc == 0x11) notSupported++ else notSupported = 0   // 11 = Dienst unbekannt
+                            // 11/12 = unbekannt, 31 = Nummer gibt es nicht, 78 = bitte warten.
+                            // Alles andere heißt: die Nummer existiert, ist aber gesperrt/an Bedingungen geknüpft
+                            if (rep.nrc !in setOf(0x11, 0x12, 0x31, 0x78)) {
+                                val cmd = if (t.service == 0x21) "21%02X".format(i) else "22%04X".format(i)
+                                locked["${t.ecu.header}:$cmd"] = "%02X".format(rep.nrc) + if (deep) " erw" else " std"
+                            }
                         }
                         DiagParser.Reply.None -> {}
                     }
@@ -549,6 +558,10 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 appendLine("# Treffer: steuergeraet;adresse;anfrage;antwort;sitzung")
                 hits.values.filter { !(it.service == 0x22 && it.id in ReadOnly.privateDids) }
                     .forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data};${if (it.ext) "erweitert" else "standard"}") }
+                if (locked.isNotEmpty()) {
+                    appendLine("# Vorhanden, aber gesperrt/Bedingung (adresse:anfrage;absagecode sitzung) – 22 Bedingungen, 33 gesperrt, 7E/7F andere Sitzung")
+                    locked.forEach { (k, v) -> appendLine("$k;$v") }
+                }
                 if (testLog.isNotEmpty()) {
                     appendLine("# Adapter-Test (Kopfzeilen an: erste 3 Zeichen = Absender-ID)")
                     testLog.forEach { appendLine(it) }

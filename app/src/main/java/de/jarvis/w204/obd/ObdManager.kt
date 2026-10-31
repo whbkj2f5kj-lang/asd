@@ -162,7 +162,7 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
         val boostPid = if (Pid.MAP_EXT.code in supported) Pid.MAP_EXT else Pid.MAP
         // Schnelle Werte jede Runde, langsame reihum (alte ELM-Klone schaffen ~10–20 Abfragen/s)
         val fast = listOf(Pid.RPM, Pid.SPEED, boostPid, Pid.LOAD).filter { it.code in supported }
-        val slow = listOf(Pid.COOLANT, Pid.EXHAUST, Pid.MAF, Pid.LAMBDA, Pid.FUEL_RATE, Pid.IAT, Pid.BARO, Pid.AMBIENT, Pid.RAIL, Pid.FUEL)
+        val slow = listOf(Pid.COOLANT, Pid.EXHAUST, Pid.MAF, Pid.LAMBDA, Pid.FUEL_RATE, Pid.IAT, Pid.BARO, Pid.AMBIENT, Pid.RAIL, Pid.FUEL, Pid.OIL_TEMP)
             .filter { it.code in supported }
 
         var cycle = 0

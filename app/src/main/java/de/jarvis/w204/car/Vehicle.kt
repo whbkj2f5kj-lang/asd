@@ -46,6 +46,8 @@ data class VehicleState(
     val lambda: Double? = null,
     /** Abgastemperatur vor dem Partikelfilter (PID 3E) */
     val exhaustTemp: Int? = null,
+    /** Motoröltemperatur (Standard-PID 0x5C, nur wenn das Steuergerät sie liefert) */
+    val oilTemp: Int? = null,
 ) {
     /** Ladedruck relativ zur Umgebung in bar */
     val boostBar: Double?

@@ -237,6 +237,7 @@ private fun StatusBar(v: VehicleState, message: String?, clock: String, tireText
             v.consumption?.let { Stat((if (v.fuelEstimated) "≈" else "") + fmt1(it), "l/100", J.accent, label = "Verbrauch") }
             v.fuelLevel?.let { Stat(it.toString(), "%", if (it < 12) J.warn else null, label = "Tank") }
             v.exhaustTemp?.let { Stat(it.toString(), "°C", if (it >= 480) J.warn else null, label = "Abgas") }
+            v.oilTemp?.let { Stat(it.toString(), "°C", if (it >= 130) J.warn else null, label = "Öl") }
             Stat(v.coolant?.toString(), "°C", coolantColor(v.coolant), label = "Motor")
             Stat(v.ambient?.let { (if (it > 0) "+" else "") + it }, "°C", null, label = "Außen")
         }
