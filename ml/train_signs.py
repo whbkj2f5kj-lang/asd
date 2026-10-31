@@ -103,11 +103,11 @@ def main():
     print("Training:", x_tr.shape, "Test:", x_te.shape, flush=True)
 
     aug = keras.Sequential([
-        layers.RandomRotation(0.04, fill_mode="nearest"),
-        layers.RandomTranslation(0.08, 0.08, fill_mode="nearest"),
-        layers.RandomZoom((-0.12, 0.12), fill_mode="nearest"),
-        layers.RandomContrast(0.35),
-        layers.RandomBrightness(0.35, value_range=(0.0, 1.0)),
+        layers.RandomRotation(0.03, fill_mode="nearest"),
+        layers.RandomTranslation(0.06, 0.06, fill_mode="nearest"),
+        layers.RandomZoom((-0.1, 0.1), fill_mode="nearest"),
+        layers.RandomContrast(0.25),
+        layers.RandomBrightness(0.25, value_range=(0.0, 1.0)),
     ])
 
     def prep(x, y, train):
@@ -121,13 +121,14 @@ def main():
           .map(lambda a, b: prep(a, b, True), num_parallel_calls=tf.data.AUTOTUNE).prefetch(4))
     ds_te = tf.data.Dataset.from_tensor_slices((x_te2, y_te2)).batch(512).map(lambda a, b: prep(a, b, False))
 
+    # Conv -> BatchNorm -> ReLU; BatchNorm wird beim Export in die Faltung eingerechnet
     inp = keras.Input((S, S, 3))
-    x = layers.Conv2D(16, 3, padding="same", activation="relu", name="c1")(inp)
-    x = layers.MaxPooling2D()(x)
-    x = layers.Conv2D(32, 3, padding="same", activation="relu", name="c2")(x)
-    x = layers.MaxPooling2D()(x)
-    x = layers.Conv2D(64, 3, padding="same", activation="relu", name="c3")(x)
-    x = layers.MaxPooling2D()(x)
+    x = inp
+    for i, n in enumerate([16, 32, 64], start=1):
+        x = layers.Conv2D(n, 3, padding="same", name=f"c{i}")(x)
+        x = layers.BatchNormalization(name=f"bn{i}")(x)
+        x = layers.ReLU()(x)
+        x = layers.MaxPooling2D()(x)
     x = layers.Flatten()(x)
     x = layers.Dropout(0.3)(x)
     x = layers.Dense(128, activation="relu", name="d1")(x)
@@ -139,8 +140,8 @@ def main():
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         metrics=["accuracy"],
     )
-    model.fit(ds, epochs=22, validation_data=ds_te, verbose=2,
-              callbacks=[keras.callbacks.ReduceLROnPlateau(patience=2, factor=0.4, verbose=1)])
+    model.fit(ds, epochs=30, validation_data=ds_te, verbose=2,
+              callbacks=[keras.callbacks.ReduceLROnPlateau(monitor="val_loss", patience=2, factor=0.4, verbose=1)])
 
     logits_te = model.predict(x_te.astype(np.float32) / 255.0, batch_size=512, verbose=0)
     acc = float((logits_te.argmax(1) == y_te).mean())
@@ -151,7 +152,13 @@ def main():
     # ---- Gewichte schreiben
     os.makedirs(os.path.dirname(OUT_MODEL), exist_ok=True)
     tensors = []
-    for name in ["c1", "c2", "c3", "d1", "d2"]:
+    for i in (1, 2, 3):
+        k, b = model.get_layer(f"c{i}").get_weights()
+        gamma, beta, mean, var = model.get_layer(f"bn{i}").get_weights()
+        eps = model.get_layer(f"bn{i}").epsilon
+        scale = gamma / np.sqrt(var + eps)
+        tensors += [k * scale, (b - mean) * scale + beta]
+    for name in ["d1", "d2"]:
         k, b = model.get_layer(name).get_weights()
         tensors += [k, b]
     with open(OUT_MODEL, "wb") as f:
