@@ -125,8 +125,6 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
         val p = pose
         if (p != null) {
             Map3DCanvas(ways, buildings, p, ms.roadKey, Modifier.fillMaxSize(), maxHouses = budget.houses, onDrawMs = budget::report)
-        } else {
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MapC.skyTop, MapC.skyBottom))))
         }
 
         // Straßenname + Limit
@@ -282,8 +280,7 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
         return Offset(cx + focal * l / depth, cy - focal * upc / depth)
     }
 
-    // Himmel/Boden
-    drawRect(Brush.verticalGradient(listOf(MapC.skyTop, MapC.skyBottom, MapC.ground), startY = 0f, endY = hgt))
+    // kein eigener Hintergrund: die Karte schwebt frei über dem Cockpit-Hintergrund
 
     // ---------- Straßen: pro Klasse und Entfernung ein gemeinsamer Pfad (wenige Zeichenaufrufe)
     val bands = 3
@@ -391,7 +388,8 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
     drawPath(arrow, MapC.current, style = Stroke(width = 2f))
 
     // Ränder weich ausblenden (Karte schwebt im Cockpit)
-    drawRect(Brush.verticalGradient(listOf(Color.Black, Color.Transparent), startY = 0f, endY = hgt * 0.22f), blendMode = BlendMode.DstOut)
-    drawRect(Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = 0f, endX = w * 0.08f), blendMode = BlendMode.DstOut)
-    drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = w * 0.92f, endX = w), blendMode = BlendMode.DstOut)
+    drawRect(Brush.verticalGradient(listOf(Color.Black, Color.Transparent), startY = 0f, endY = hgt * 0.25f), blendMode = BlendMode.DstOut)
+    drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = hgt * 0.9f, endY = hgt), blendMode = BlendMode.DstOut)
+    drawRect(Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = 0f, endX = w * 0.14f), blendMode = BlendMode.DstOut)
+    drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = w * 0.86f, endX = w), blendMode = BlendMode.DstOut)
 }
