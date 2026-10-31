@@ -43,7 +43,11 @@ jobs:
           set -o pipefail
           pip install -q tensorflow-cpu==2.16.1 pillow numpy huggingface_hub pyarrow
           export TF_CPP_MIN_LOG_LEVEL=2
-          python -u ml/train_signs.py 2>&1 | tee train.log
+          if ! python -u ml/train_signs.py > train.log 2>&1; then
+            grep -vE "tensorflow/core|oneDNN|cpu_feature|To enable the following|rebuild TensorFlow|^\s*$" train.log | tail -25 | while IFS= read -r l; do echo "::error title=Training::$l"; done
+            exit 1
+          fi
+          grep -E "Genauigkeit|geschrieben|Training:" train.log || true
 
       - name: APK bauen
         shell: bash
