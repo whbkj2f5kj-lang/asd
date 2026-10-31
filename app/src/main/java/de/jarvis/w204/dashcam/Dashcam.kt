@@ -53,6 +53,8 @@ class Dashcam(context: Context, scope: CoroutineScope) {
         val loopMinutes: Int = 3,
         val overlay: Boolean = true,
         val volume: String = MediaStore.VOLUME_EXTERNAL_PRIMARY,
+        /** Debug-Aufnahme: ohne Einblendungen, jeder Abschnitt bleibt (Ordner Debug) */
+        val debug: Boolean = false,
     )
 
     data class Status(
@@ -65,6 +67,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
         val savedCount: Int = 0,
         val lastSaved: String? = null,
         val error: String? = null,
+        val debugCount: Int = 0,
     )
 
     private val ctx = context.applicationContext
@@ -74,6 +77,9 @@ class Dashcam(context: Context, scope: CoroutineScope) {
 
     /** Text für die Einblendung (z. B. "87 km/h"), wird vom ViewModel gesetzt */
     @Volatile var overlayText: () -> String = { "" }
+
+    /** Debug: Abschnitt beginnt – Dateiname + Zeit des ersten Bilds (monotone ms, wie DebugTime) */
+    @Volatile var onSegmentStart: ((String, Long) -> Unit)? = null
 
     /** Erkannte Schild-Kandidaten (normiert 0..1) – werden zur Kontrolle mit ins Video gezeichnet */
     @Volatile var overlayBoxes: () -> List<de.jarvis.w204.vision.SignBox> = { emptyList() }
@@ -98,6 +104,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
     private var protectUntil = 0L
     private val ring = ArrayDeque<Uri>()
     private var saved = 0
+    private var debugCount = 0
     private var fpsFrames = 0
     private var fpsSince = 0L
     private var scanned = false
@@ -105,6 +112,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
     private class Segment(val uri: Uri, val name: String, val pfd: ParcelFileDescriptor, val muxer: MediaMuxer, val track: Int, var protect: Boolean) {
         var samples = 0
         var pts0 = -1L
+        var debug = false
     }
 
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -136,6 +144,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
             if (!scanned) { scanned = true; scanExisting() }
             when {
                 !c.enabled -> { finish("Aus"); update { it.copy(enabled = false, message = "Aus") } }
+                old.debug != c.debug -> { finish(if (c.debug) "Debug-Aufnahme – wartet auf Kamerabild" else "Bereit – wartet auf Kamerabild"); update { it.copy(enabled = true) } }
                 old.volume != c.volume -> { finish("Speicherort gewechselt – wartet auf Kamerabild"); ring.clear(); scanExisting(); update { it.copy(enabled = true) } }
                 else -> {
                     trimRing()
@@ -202,7 +211,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
         val canvas = try { s.lockHardwareCanvas() } catch (t: Throwable) { s.lockCanvas(null) }
         try {
             canvas.drawBitmap(bmp, null, dst, paint)
-            if (cfg.overlay) drawOverlay(canvas)
+            if (cfg.overlay && !cfg.debug) drawOverlay(canvas)
         } finally {
             s.unlockCanvasAndPost(canvas)
         }
@@ -307,6 +316,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
                             if (s.pts0 < 0) {
                                 if (!key) return@let
                                 s.pts0 = info.presentationTimeUs
+                                runCatching { onSegmentStart?.invoke(s.name, s.pts0 / 1000) }
                             }
                             info.presentationTimeUs -= s.pts0
                             buf.position(info.offset)
@@ -353,11 +363,12 @@ class Dashcam(context: Context, scope: CoroutineScope) {
 
     private fun openSegment() {
         val fmt = outFormat ?: return
-        val name = "W204_${fileStamp.format(Date())}.mp4"
+        val debug = cfg.debug
+        val name = (if (debug) "DBG_" else "W204_") + "${fileStamp.format(Date())}.mp4"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, DIR)
+            put(MediaStore.Video.Media.RELATIVE_PATH, if (debug) DEBUG_DIR else DIR)
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection(), values) ?: throw IllegalStateException("Videodatei konnte nicht angelegt werden")
@@ -365,7 +376,7 @@ class Dashcam(context: Context, scope: CoroutineScope) {
         val muxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         val track = muxer.addTrack(fmt)
         muxer.start()
-        seg = Segment(uri, name, pfd, muxer, track, protect = SystemClock.elapsedRealtime() < protectUntil)
+        seg = Segment(uri, name, pfd, muxer, track, protect = SystemClock.elapsedRealtime() < protectUntil).also { it.debug = debug }
     }
 
     private fun closeSegment() {
@@ -376,6 +387,12 @@ class Dashcam(context: Context, scope: CoroutineScope) {
         runCatching { s.pfd.close() }
         if (!ok) {
             runCatching { resolver.delete(s.uri, null, null) }
+            return
+        }
+        if (s.debug) {
+            runCatching { resolver.update(s.uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null) }
+            debugCount++
+            update { it.copy(debugCount = debugCount) }
             return
         }
         val protect = s.protect || SystemClock.elapsedRealtime() < protectUntil
@@ -465,5 +482,6 @@ class Dashcam(context: Context, scope: CoroutineScope) {
         private const val MIN_FREE = 500L * 1024 * 1024
         const val DIR = "Movies/W204-Dashcam/"
         const val SAVED_DIR = "Movies/W204-Dashcam/Gesichert/"
+        const val DEBUG_DIR = "Movies/W204-Dashcam/Debug/"
     }
 }

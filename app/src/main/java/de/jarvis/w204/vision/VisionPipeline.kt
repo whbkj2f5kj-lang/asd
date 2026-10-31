@@ -28,6 +28,11 @@ class VisionPipeline(
     @Volatile var signsEnabled = true
     @Volatile var objectsEnabled = true
     @Volatile var calibration = Calibration()
+    /** Debug-Aufnahme: Entscheidungen der Schildererkennung protokollieren */
+    var signDebug: ((String) -> Unit)?
+        get() = signs.debug
+        set(v) { signs.debug = v }
+
     /** Dashcam bekommt jedes Kamerabild, das sie haben möchte */
     @Volatile var recorder: de.jarvis.w204.dashcam.Dashcam? = null
 

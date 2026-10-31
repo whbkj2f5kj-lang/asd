@@ -32,6 +32,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val map = de.jarvis.w204.map.MapLimits(app, viewModelScope)
     val dashcam = de.jarvis.w204.dashcam.Dashcam(app, viewModelScope)
 
+    // ---------- Debug-Aufnahme: Video ohne Einblendung + synchrones Protokoll aller Entscheidungen
+    val debugLog = de.jarvis.w204.debug.DebugLog(app)
+    /** absichtlich nicht gespeichert: nach Neustart wieder aus (füllt sonst den Speicher) */
+    val debugRec = MutableStateFlow(false)
+
+    fun setDebugRecording(on: Boolean) {
+        if (debugRec.value == on) return
+        debugRec.value = on
+        if (on) {
+            val s = _settings.value
+            debugLog.start(
+                "{\"k\":\"hdr\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"app\":\"${BuildConfig.VERSION_NAME}\"," +
+                    "\"wall\":\"${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.GERMANY).format(java.util.Date())}\"," +
+                    "\"cal\":[${s.camHeight},${s.horizon},${s.camFov}],\"cam\":${s.cameraSource},\"camIdx\":${s.cameraIndex}}"
+            )
+            vision.signDebug = { debugLog.log(it) }
+            dashcam.onSegmentStart = { name, t0 -> debugLog.log("{\"k\":\"seg\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"file\":\"$name\",\"t0\":$t0}") }
+        } else {
+            vision.signDebug = null
+            dashcam.onSegmentStart = null
+            debugLog.stop()
+        }
+        applyRuntime(_settings.value)
+    }
+
+    private fun f2(v: Float?) = v?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "null"
+    private fun f4(v: Float?) = v?.let { String.format(java.util.Locale.US, "%.4f", it) } ?: "null"
+
+    private fun logFrame(f: VisionFrame, sc: Scene, depart: Int) {
+        val m = f.lanes.model
+        val lane = if (m == null) "null" else
+            "{\"l\":${f2(m.left)},\"r\":${f2(m.right)},\"h\":${f4(m.heading)},\"c\":${f4(m.curve)},\"ls\":${m.leftSeen},\"rs\":${m.rightSeen},\"y\":${m.yellow}}"
+        val objs = f.objects.joinToString(",") { "[\"${it.kind.name}\",${f2(it.l)},${f2(it.t)},${f2(it.r)},${f2(it.b)},${f2(it.score)}]" }
+        debugLog.log(
+            "{\"k\":\"fr\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"kmh\":${obd.vehicle.value.speed},\"lane\":$lane," +
+                "\"scene\":[${f2(sc.laneLeft)},${f2(sc.laneRight)},${sc.laneDetected}],\"lead\":${f2(sc.leadDistance)},\"ldw\":$depart,\"obj\":[$objs],\"signs\":${f.signs.size}}"
+        )
+    }
+
     /** 0 = ok/keine Daten, 1 = Druck niedrig/Batterie, 2 = Luftverlust */
     fun tireLevel(t: de.jarvis.w204.tpms.TireState, s: Settings): Int {
         if (t.noSignal) return 0
@@ -155,6 +194,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (d != 0) { laneDeparture.value = d; laneDepartureAt = now; beep() }
             }
             if (laneDeparture.value != 0 && now - laneDepartureAt > 1500) laneDeparture.value = 0
+            if (debugLog.active) logFrame(f, sc, laneDeparture.value)
         },
         onSign = { onSignEvent(it) },
     )
@@ -204,6 +244,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         applyRuntime(_settings.value)
         if (_settings.value.tpms) tpms.start()
+
+        // Debug-Protokoll: Zustand 1× pro Sekunde
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                if (!debugLog.active) continue
+                val v = obd.vehicle.value
+                val ms = map.state.value
+                val lat = ms.lat?.let { String.format(java.util.Locale.US, "%.6f", it) } ?: "null"
+                val lon = ms.lon?.let { String.format(java.util.Locale.US, "%.6f", it) } ?: "null"
+                val road = (ms.road ?: "").replace("\"", "'")
+                debugLog.log(
+                    "{\"k\":\"st\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"kmh\":${v.speed},\"rpm\":${v.rpm},\"lim\":${_speedLimit.value}," +
+                        "\"note\":\"${limitNote.value ?: ""}\",\"src\":${limitSource.value},\"np\":${noPassing.value}," +
+                        "\"gps\":{\"fix\":${ms.hasFix},\"lat\":$lat,\"lon\":$lon,\"acc\":${ms.acc},\"road\":\"$road\",\"map\":${ms.limit?.kmh},\"txt\":\"${ms.gps.replace("\"", "'")}\"}," +
+                        "\"sfps\":${f2(vision.signFps)},\"dc\":\"${dashcam.status.value.message}\",\"dcfps\":${dashcam.status.value.fps}}"
+                )
+            }
+        }
 
         // Dashcam: starke Bremsung -> Video automatisch sichern
         viewModelScope.launch {
@@ -334,6 +393,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun onSignEvent(e: de.jarvis.w204.vision.SignEvent) {
+        if (debugLog.active) debugLog.log("{\"k\":\"sev\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"e\":\"${e.toString().replace("\"", "'")}\"}")
         when (e) {
             is de.jarvis.w204.vision.SignEvent.Limit -> {
                 when {
@@ -430,7 +490,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         vision.objectsEnabled = s.objectRecognition
         vision.calibration = s.calibration
         if (s.mapLimits) map.start() else map.stop()
-        dashcam.configure(de.jarvis.w204.dashcam.Dashcam.Config(s.dashcam, s.dashcamLoop, s.dashcamOverlay, s.dashcamVolume))
+        val dbg = debugRec.value
+        dashcam.configure(de.jarvis.w204.dashcam.Dashcam.Config(s.dashcam || dbg, s.dashcamLoop, s.dashcamOverlay, s.dashcamVolume, debug = dbg))
         recompute()
         if (!s.objectRecognition) _scene.value = Scene()
     }
@@ -491,6 +552,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         tpms.release()
         runCatching { tone?.release() }
+        debugLog.stop()
         map.stop()
         dashcam.flush()
         obd.stop()

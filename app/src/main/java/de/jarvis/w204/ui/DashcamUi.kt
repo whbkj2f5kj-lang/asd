@@ -48,12 +48,15 @@ fun DashcamButton(vm: MainViewModel) {
     val st by vm.dashcam.status.collectAsStateWithLifecycle()
     val pulse = rememberInfiniteTransition(label = "rec")
     val a by pulse.animateFloat(1f, 0.25f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "recA")
-    val on = settings.dashcam
+    val dbg by vm.debugRec.collectAsStateWithLifecycle()
+    val on = settings.dashcam || dbg
     val recording = on && st.recording
     Row(
         Modifier.clip(RoundedCornerShape(50))
             .background(if (recording) Color(0x33FF3B30) else J.panel2)
-            .combinedClickable(onClick = { vm.dashcamTap() }, onLongClick = { if (on) vm.update { it.copy(dashcam = false) } })
+            .combinedClickable(onClick = { vm.dashcamTap() }, onLongClick = {
+                if (dbg) vm.setDebugRecording(false) else if (on) vm.update { it.copy(dashcam = false) }
+            })
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -65,6 +68,7 @@ fun DashcamButton(vm: MainViewModel) {
         Spacer(Modifier.width(6.dp))
         Text(
             when {
+                recording && dbg -> "DEBUG"
                 recording -> "REC"
                 on -> "CAM …"
                 else -> "CAM"
@@ -95,6 +99,14 @@ fun DashcamSettings(vm: MainViewModel) {
         st.lastSaved?.let { DcHint("Zuletzt gesichert: $it") }
         st.error?.let { DcHint("⚠ $it") }
     }
+
+    val dbg by vm.debugRec.collectAsStateWithLifecycle()
+    Spacer(Modifier.size(6.dp))
+    DcSwitch("Debug-Aufnahme für die Auswertung", dbg) { vm.setDebugRecording(it) }
+    if (dbg) {
+        DcHint("Läuft: Video ohne Einblendung in Movies/W204-Dashcam/Debug (${st.debugCount} Minuten fertig) + Protokoll in ${vm.debugLog.fileName ?: "Download/W204/Debug"}")
+    }
+    DcHint("Nimmt jede Minute als eigene Datei auf und schreibt dazu bildgenau mit, was die App gesehen und entschieden hat (Schilder, Spur, Fahrzeuge, GPS, Tempo). Danach Videos + Protokoll-Datei hochladen. Wird beim Neustart der App automatisch wieder ausgeschaltet. Enthält deine GPS-Position.")
 
     Text("Ringspeicher (wird laufend überschrieben)", color = J.text, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {

@@ -10,6 +10,11 @@ import de.jarvis.w204.CrashGuard
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
+/** Gemeinsame Zeitbasis für Debug-Protokoll und Video (monoton, ms – wie die Video-Zeitstempel) */
+object DebugTime {
+    fun now(): Long = System.nanoTime() / 1_000_000
+}
+
 /** Kandidat für ein Schild, Koordinaten normiert (0..1). */
 data class SignBox(val l: Float, val t: Float, val r: Float, val b: Float, val value: Int?, val label: String? = null)
 
@@ -43,6 +48,16 @@ class SignReader(
     private var recognizer: TextRecognizer? = null
     private var net: SignNet? = null
     private var netTried = false
+
+    /** Debug-Aufnahme: jede Entscheidung als JSON-Zeile (null = aus) */
+    @Volatile var debug: ((String) -> Unit)? = null
+
+    private fun f3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
+    private fun dbgCand(typ: String, n: FloatArray, wPx: Int, cr: SignNet.Result?, res: String) {
+        val d = debug ?: return
+        d("{\"k\":\"sc\",\"t\":${DebugTime.now()},\"typ\":\"$typ\",\"b\":[${f3(n[0])},${f3(n[1])},${f3(n[2])},${f3(n[3])}],\"px\":$wPx" +
+            (if (cr != null) ",\"cls\":${cr.cls},\"p\":${f3(cr.p)}" else "") + ",\"res\":\"${res.replace("\"", "'")}\"}")
+    }
 
     private fun net(): SignNet? {
         if (!netTried) { netTried = true; net = runCatching { netLoader() }.getOrNull() }
@@ -128,21 +143,23 @@ class SignReader(
             }
             tot > 0 && rd <= tot * 0.2f && br >= tot * 0.25f
         }.sortedByDescending { it.w * it.h }.take(3)
+        debug?.invoke("{\"k\":\"sr\",\"t\":${DebugTime.now()},\"w\":$sw,\"rings\":${rings.size}}")
 
         for (bl in rings) {
             val n = norm(bl)
-            if (onVehicle(n)) { boxes += SignBox(n[0], n[1], n[2], n[3], null, "Fahrzeug"); continue }
+            if (onVehicle(n)) { boxes += SignBox(n[0], n[1], n[2], n[3], null, "Fahrzeug"); dbgCand("ring", n, bl.w, null, "Fahrzeug"); continue }
             val cr = classify(full, n, 0.12f)
             val sure = cr != null && cr.p >= 0.85f
             var weakHit = false
             if (sure && cr!!.cls == SignNet.NO_PASSING) {
+                dbgCand("ring", n, bl.w, cr, "Ueberholverbot")
                 events += SignEvent.NoPassing
                 if (cr.p >= 0.97f) strong += SignEvent.NoPassing.key
                 boxes += SignBox(n[0], n[1], n[2], n[3], null, "Überholverbot")
                 continue
             }
             // Netz ist sicher: kein Tempolimit (anderes rundes Schild, Rücklicht, …)
-            if (sure && cr!!.speed == null) continue
+            if (sure && cr!!.speed == null) { dbgCand("ring", n, bl.w, cr, "kein Tempo"); continue }
             val v: Int? = if (sure) {
                 val netV = cr!!.speed!!
                 // 130, 110, 90, 40, 10 kennt das Netz nicht – bei ähnlichen Ziffern die Texterkennung fragen
@@ -182,6 +199,7 @@ class SignReader(
                 if (weakHit) weak += ev.key
             }
             boxes += SignBox(n[0], n[1], n[2], n[3], v, note)
+            dbgCand("ring", n, bl.w, cr, (v?.toString() ?: "?") + (if (weakHit) " schwach" else if (sure) " sicher" else " Text") + (note?.let { " $it" } ?: ""))
         }
 
         // ---------- 2) Aufhebungszeichen (weiß, schwarze Schrägstreifen)
@@ -200,6 +218,7 @@ class SignReader(
                 if (onVehicle(n)) return@forEach
                 // zuerst das Netz fragen (kennt Ende 80, Ende aller Verbote, Ende Überholverbot)
                 val cr = classify(full, n, 0.15f)
+                dbgCand("weiss", n, bl.w, cr, "")
                 if (cr != null && cr.p >= 0.8f) {
                     if (cr.p >= 0.97f) when (cr.cls) {
                         SignNet.END_ALL -> strong += SignEvent.EndAll.key
@@ -265,6 +284,7 @@ class SignReader(
             val last = lastEmit[key]
             if (last != null && now - last < 15_000) continue
             lastEmit[key] = now
+            debug?.invoke("{\"k\":\"ev\",\"t\":${DebugTime.now()},\"key\":\"${key.replace("\"", "'")}\",\"sum\":$sum}")
             onEvent(weighted.last { it.second.key == key }.second)
         }
     }

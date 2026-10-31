@@ -50,6 +50,9 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val tiles: Int = 0,
         val loading: Boolean = false,
         val error: String? = null,
+        val lat: Double? = null,
+        val lon: Double? = null,
+        val acc: Int? = null,
     )
 
     private val ctx = context.applicationContext
@@ -251,6 +254,9 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val cur = shown
         val tileLoaded = tiles.containsKey(Osm.tileKey(ty, tx))
         _state.value = _state.value.copy(
+            lat = loc.latitude,
+            lon = loc.longitude,
+            acc = acc,
             hasFix = true,
             gps = gpsText,
             road = cur?.way?.label ?: cur?.let { roadType(it.way.highway) },
