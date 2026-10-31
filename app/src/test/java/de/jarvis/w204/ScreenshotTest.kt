@@ -153,11 +153,12 @@ class ScreenshotTest {
             ways += de.jarvis.w204.map.Way(id++, mapOf("highway" to if (k % 4 == 0) "tertiary" else "residential", "name" to "Ost $k"), doubleArrayOf(lat0 + k * 110 * dLat, lat0 + k * 110 * dLat), doubleArrayOf(lon0 - 700 * dLon, lon0 + 700 * dLon))
         }
         val houses = ArrayList<de.jarvis.w204.map.Building>()
-        for (i in -6 until 6) for (j in -6 until 6) {
-            val x0 = i * 90 + 14.0; val y0 = j * 110 + 14.0; val w = 60.0; val h = 80.0
+        for (i in -6 until 6) for (j in -6 until 6) for (q in 0 until 4) {
+            val x0 = i * 90 + 12.0 + (q % 2) * 38; val y0 = j * 110 + 12.0 + (q / 2) * 48
+            val w = 16.0 + ((i * 5 + j * 3 + q) and 7) * 2; val h = 14.0 + ((i + j * 7 + q * 3) and 7) * 3
             val xs = doubleArrayOf(x0, x0 + w, x0 + w, x0, x0)
             val ys = doubleArrayOf(y0, y0, y0 + h, y0 + h, y0)
-            houses += de.jarvis.w204.map.Building(id++, DoubleArray(5) { lat0 + ys[it] * dLat }, DoubleArray(5) { lon0 + xs[it] * dLon }, (8 + ((i * 7 + j * 13) and 15) * 2).toFloat())
+            houses += de.jarvis.w204.map.Building(id++, DoubleArray(5) { lat0 + ys[it] * dLat }, DoubleArray(5) { lon0 + xs[it] * dLon }, (7 + ((i * 7 + j * 13 + q) and 7) * 3).toFloat())
         }
         return ways to houses
     }
@@ -167,7 +168,7 @@ class ScreenshotTest {
         paparazzi.snapshot {
             JarvisTheme {
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().androidx_bg()) {
-                    de.jarvis.w204.ui.Map3DCanvas(ways, houses, de.jarvis.w204.ui.MapPose(51.48 - 300 / 110540.0, 7.21, 0f), "primary", Modifier.fillMaxSize())
+                    de.jarvis.w204.ui.Map3DCanvas(ways, houses, de.jarvis.w204.ui.MapPose(51.48 - 300 / 110540.0, 7.21, 0f), "Nord 0", Modifier.fillMaxSize())
                 }
             }
         }

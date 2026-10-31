@@ -217,20 +217,20 @@ fun Map3DCanvas(ways: List<Way>, buildings: List<Building>, pose: MapPose, curre
     }
 }
 
-private const val CAM_H = 75f       // Kamerahöhe über dem Auto (m)
-private const val CAM_D = 60f       // Abstand hinter dem Auto (m)
-private const val PITCH = 0.84f     // Blickwinkel nach unten (rad, ~48°)
-private const val F_MIN = -50f      // sichtbarer Bereich hinter dem Auto
-private const val F_MAX = 750f      // … und davor
+private const val CAM_H = 230f      // Kamerahöhe über dem Auto (m)
+private const val CAM_D = 150f      // Abstand hinter dem Auto (m)
+private const val PITCH = 1.0f      // Blickwinkel nach unten (rad, ~57°)
+private const val F_MIN = -60f      // sichtbarer Bereich hinter dem Auto
+private const val F_MAX = 950f      // … und davor
 
 private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: Float, currentRoad: String?) {
     val w = size.width
     val hgt = size.height
     val sp = sin(PITCH)
     val cp = cos(PITCH)
-    val focal = max(w, hgt) * 0.75f
+    val focal = max(w, hgt) * 1.0f
     val cx = w / 2f
-    val cy = hgt * 0.78f
+    val cy = hgt * 0.76f
 
     // Welt (Meter, Ost/Nord) -> Auto (l = rechts, f = vorn)
     fun lf(x: Float, y: Float): Pair<Float, Float> {
@@ -254,7 +254,7 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
     val casing = Array(bands) { Path() }
     val fills = Array(3) { Array(bands) { Path() } }
     val cur = Path()
-    fun band(f: Float) = when { f < 180f -> 0; f < 420f -> 1; else -> 2 }
+    fun band(f: Float) = when { f < 260f -> 0; f < 560f -> 1; else -> 2 }
 
     for (r in p.roads) {
         var pl = 0f; var pf = 0f; var havePrev = false
@@ -301,11 +301,11 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
     val vis = ArrayList<Vis>()
     for (b in p.houses) {
         val (l, f) = lf(b.cx, b.cy)
-        if (f < -30f || f > 520f || abs(l) > 380f) continue
+        if (f < -40f || f > 720f || abs(l) > 520f) continue
         vis += Vis(b, f * f + l * l)
     }
     vis.sortByDescending { it.dist }
-    val maxHouses = 320
+    val maxHouses = 420
     val list = if (vis.size > maxHouses) vis.subList(vis.size - maxHouses, vis.size) else vis
     val walls = Path()
     val roof = Path()
@@ -316,7 +316,7 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
         for (i in 0 until n) { val (l, f) = lf(b.x[i], b.y[i]); gl[i] = l; gf[i] = f }
         val base = Array(n) { proj(gl[it], gf[it], 0f) }
         val top = Array(n) { proj(gl[it], gf[it], b.h) }
-        val fogA = (1f - (sqrt(v.dist) / 560f)).coerceIn(0.25f, 1f)
+        val fogA = (1f - (sqrt(v.dist) / 900f)).coerceIn(0.3f, 1f)
         walls.reset()
         // Umlaufsinn des Grundrisses -> Außenseite jeder Wand
         var area = 0f
@@ -342,10 +342,10 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
     // ---------- eigenes Auto: flacher Pfeil auf der Straße mit Lichtschein
     val c0 = proj(0f, 0f, 0f)
     drawCircle(
-        Brush.radialGradient(listOf(MapC.current.copy(alpha = 0.45f), Color.Transparent), center = c0, radius = w * 0.06f),
-        radius = w * 0.06f, center = c0,
+        Brush.radialGradient(listOf(MapC.current.copy(alpha = 0.45f), Color.Transparent), center = c0, radius = w * 0.07f),
+        radius = w * 0.07f, center = c0,
     )
-    val s = 2.6f
+    val s = 3.6f
     val tip = proj(0f, 4.2f * s, 0.2f)
     val left = proj(-2.4f * s, -2.6f * s, 0.2f)
     val notch = proj(0f, -1.2f * s, 0.2f)
