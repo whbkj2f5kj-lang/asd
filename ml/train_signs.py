@@ -9,24 +9,17 @@ Netz (bewusst klein, läuft in reinem Kotlin in wenigen ms):
   32x32x3 -> Conv3x3(16) ReLU MaxPool2 -> Conv3x3(32) ReLU MaxPool2 -> Conv3x3(64) ReLU MaxPool2
           -> Flatten(1024) -> Dense(128) ReLU -> Dense(44)
 """
-import csv
 import glob
-import hashlib
 import os
 import struct
 import sys
-import urllib.request
-import zipfile
 
 import numpy as np
 from PIL import Image
 
-BASE = "https://sid.erda.dk/public/archives/daaeac0d7ce1152aea9b61d9f1e19370/"
-FILES = {
-    "GTSRB-Training_fixed.zip": "513f3c79a4c5141765e10e952eaa2478",
-    "GTSRB_Final_Test_Images.zip": "c7e4e6327067d32654124b0fe9e82185",
-    "GTSRB_Final_Test_GT.zip": "fe31e9c9270bbcd7b84b7f21a9d9d9e5",
-}
+# Quelle: Kopie des GTSRB-Datensatzes auf Hugging Face (gleiche Klassen-Reihenfolge 0..42),
+# der Originalserver (sid.erda.dk) ist vom GitHub-Build aus nicht erreichbar.
+HF_REPO = "tanganke/gtsrb"
 S = 32
 NEG = 43
 CLASSES = 44
@@ -36,57 +29,25 @@ OUT_MODEL = os.path.join(ROOT, "app/src/main/assets/signnet.bin")
 OUT_SAMPLES = os.path.join(ROOT, "app/src/test/resources/signnet_samples.bin")
 
 
-def md5(path):
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def fetch():
-    os.makedirs(WORK, exist_ok=True)
-    for name, sum_ in FILES.items():
-        p = os.path.join(WORK, name)
-        if not os.path.exists(p) or md5(p) != sum_:
-            print("lade", name, flush=True)
-            urllib.request.urlretrieve(BASE + name, p)
-            if md5(p) != sum_:
-                sys.exit(f"Prüfsumme falsch: {name}")
-        marker = p + ".done"
-        if not os.path.exists(marker):
-            with zipfile.ZipFile(p) as z:
-                z.extractall(WORK)
-            open(marker, "w").close()
+    from huggingface_hub import snapshot_download
+    return snapshot_download(repo_id=HF_REPO, repo_type="dataset", local_dir=WORK,
+                             allow_patterns=["data/train-*", "data/test-*"])
 
 
-def img(path, box=None):
-    im = Image.open(path).convert("RGB")
-    if box is not None:
-        im = im.crop(box)
-    return np.asarray(im.resize((S, S), Image.BILINEAR), dtype=np.uint8)
-
-
-def load_train():
+def load_split(root, split):
+    import io
+    import pyarrow.parquet as pq
     xs, ys = [], []
-    for d in sorted(glob.glob(os.path.join(WORK, "GTSRB", "Training", "*"))):
-        if not os.path.isdir(d):
-            continue
-        cls = int(os.path.basename(d))
-        for f in glob.glob(os.path.join(d, "*.ppm")):
-            xs.append(img(f))
-            ys.append(cls)
-    return np.stack(xs), np.array(ys, dtype=np.int64)
-
-
-def load_test():
-    gt = glob.glob(os.path.join(WORK, "**", "GT-final_test.csv"), recursive=True)[0]
-    folder = os.path.join(WORK, "GTSRB", "Final_Test", "Images")
-    xs, ys = [], []
-    with open(gt) as f:
-        for row in csv.DictReader(f, delimiter=";"):
-            xs.append(img(os.path.join(folder, row["Filename"])))
-            ys.append(int(row["ClassId"]))
+    for f in sorted(glob.glob(os.path.join(root, "data", f"{split}-*.parquet"))):
+        t = pq.read_table(f).to_pydict()
+        for im, lab in zip(t["image"], t["label"]):
+            data = im["bytes"] if isinstance(im, dict) else im
+            pil = Image.open(io.BytesIO(data)).convert("RGB")
+            xs.append(np.asarray(pil.resize((S, S), Image.BILINEAR), dtype=np.uint8))
+            ys.append(int(lab))
+    if not xs:
+        sys.exit(f"keine Daten für {split}")
     return np.stack(xs), np.array(ys, dtype=np.int64)
 
 
@@ -132,9 +93,9 @@ def main():
 
     tf.keras.utils.set_random_seed(204)
     rng = np.random.default_rng(204)
-    fetch()
-    x_tr, y_tr = load_train()
-    x_te, y_te = load_test()
+    root = fetch()
+    x_tr, y_tr = load_split(root, "train")
+    x_te, y_te = load_split(root, "test")
     nx, ny = negatives(x_tr, 4000, rng)
     nxt, nyt = negatives(x_te, 600, rng)
     x_tr = np.concatenate([x_tr, nx]); y_tr = np.concatenate([y_tr, ny])

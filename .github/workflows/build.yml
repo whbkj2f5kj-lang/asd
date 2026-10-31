@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          pip install -q tensorflow-cpu==2.16.1 pillow numpy
+          pip install -q tensorflow-cpu==2.16.1 pillow numpy huggingface_hub pyarrow
           python ml/train_signs.py 2>&1 | tee train.log
 
       - name: APK bauen
