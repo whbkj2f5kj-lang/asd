@@ -28,6 +28,19 @@ class VisionPipeline(
     @Volatile var signsEnabled = true
     @Volatile var objectsEnabled = true
     @Volatile var calibration = Calibration()
+    /** Empfindlichkeit 0 = vorsichtig, 1 = normal, 2 = empfindlich */
+    fun setSignSensitivity(level: Int) {
+        when (level) {
+            0 -> { signs.minWeakP = 0.6f; signs.needed = 2f }
+            2 -> { signs.minWeakP = 0.35f; signs.needed = 1f }
+            else -> { signs.minWeakP = 0.5f; signs.needed = 1.5f }
+        }
+    }
+
+    var onSignSighting: ((Int, Float) -> Unit)?
+        get() = signs.onSighting
+        set(v) { signs.onSighting = v }
+
     /** Debug-Aufnahme: Entscheidungen der Schildererkennung protokollieren */
     var signDebug: ((String) -> Unit)?
         get() = signs.debug

@@ -212,6 +212,22 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     SwitchRow("Schildererkennung", settings.signRecognition) { on -> vm.update { it.copy(signRecognition = on) } }
                     SwitchRow("Fahrzeug- und Spurerkennung", settings.objectRecognition) { on -> vm.update { it.copy(objectRecognition = on) } }
                     SwitchRow("Spurverlassenswarnung (Ton, ab 60 km/h)", settings.laneWarn) { on -> vm.update { it.copy(laneWarn = on) } }
+                    Text("Schilder-Empfindlichkeit", color = J.text, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                        listOf("Vorsichtig", "Normal", "Empfindlich").forEachIndexed { i, label ->
+                            val sel = settings.signSensitivity == i
+                            Text(
+                                label,
+                                color = if (sel) androidx.compose.ui.graphics.Color.Black else J.text,
+                                fontSize = 14.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (sel) J.accent else J.panel2)
+                                    .clickable { vm.update { it.copy(signSensitivity = i) } }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                    Hint("Empfindlich: schon eine sichere Sichtung reicht (mehr Treffer, gelegentlich ein falsches Schild). Vorsichtig: mehrere Sichtungen nötig.")
+                    SwitchRow("Vermutete Schilder klein mit „?“ zeigen", settings.signProvisional) { on -> vm.update { it.copy(signProvisional = on) } }
                     var signFps by remember { mutableStateOf(0f) }
                     var perf by remember { mutableStateOf("") }
                     androidx.compose.runtime.LaunchedEffect(Unit) {

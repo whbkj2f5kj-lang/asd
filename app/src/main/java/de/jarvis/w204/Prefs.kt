@@ -37,6 +37,10 @@ data class Settings(
     val dashcamVolume: String = "external_primary",
     /** Spurverlassenswarnung (Ton) */
     val laneWarn: Boolean = true,
+    /** Schilder: 0 vorsichtig, 1 normal, 2 empfindlich */
+    val signSensitivity: Int = 1,
+    /** unsichere Schilder klein mit "?" anzeigen */
+    val signProvisional: Boolean = true,
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -72,6 +76,8 @@ class Prefs(context: Context) {
         dashcamAutoSave = sp.getBoolean("dcAuto", true),
         dashcamVolume = sp.getString("dcVol", "external_primary") ?: "external_primary",
         laneWarn = sp.getBoolean("ldw", true),
+        signSensitivity = sp.getInt("signSens", 1),
+        signProvisional = sp.getBoolean("signProv", true),
     )
 
     fun save(s: Settings) {
@@ -102,6 +108,8 @@ class Prefs(context: Context) {
             .putBoolean("dcAuto", s.dashcamAutoSave)
             .putString("dcVol", s.dashcamVolume)
             .putBoolean("ldw", s.laneWarn)
+            .putInt("signSens", s.signSensitivity)
+            .putBoolean("signProv", s.signProvisional)
             .putFloat("horizon", s.horizon)
             .apply()
     }

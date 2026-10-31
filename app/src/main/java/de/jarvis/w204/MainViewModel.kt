@@ -141,6 +141,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var cam: CamLimit? = null
     private val limitLock = Any()
 
+    /** Vermutetes, noch nicht bestätigtes Tempolimit (klein mit "?" angezeigt) */
+    val provisional = MutableStateFlow<Int?>(null)
+    @Volatile private var provisionalAt = 0L
+
     /** Überholverbot aktiv (Kamera) */
     val noPassing = MutableStateFlow(false)
     @Volatile private var noPassingAt = 0L
@@ -237,6 +241,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             crashReport.value = report to off
         }
         vision.recorder = dashcam
+        // vorläufige Anzeige: was die Kamera gerade zu sehen glaubt (ohne Ansage/Warnung)
+        vision.onSignSighting = { v, p ->
+            if (_settings.value.signProvisional && v != _speedLimit.value) {
+                provisional.value = v
+                provisionalAt = SystemClock.elapsedRealtime()
+            }
+            if (debugLog.active) debugLog.log("{\"k\":\"pv\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"v\":$v,\"p\":${f2(p)}}")
+        }
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(500)
+                if (provisional.value != null && (SystemClock.elapsedRealtime() - provisionalAt > 3000 || provisional.value == _speedLimit.value)) provisional.value = null
+            }
+        }
         dashcam.overlayBoxes = { _visionFrame.value?.signs ?: emptyList() }
         dashcam.overlayText = {
             val v = obd.vehicle.value
@@ -490,6 +508,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         vision.signsEnabled = s.signRecognition
         vision.objectsEnabled = s.objectRecognition
         vision.calibration = s.calibration
+        vision.setSignSensitivity(s.signSensitivity)
         if (s.mapLimits) map.start() else map.stop()
         val dbg = debugRec.value
         dashcam.configure(de.jarvis.w204.dashcam.Dashcam.Config(s.dashcam || dbg, s.dashcamLoop, s.dashcamOverlay, s.dashcamVolume, debug = dbg))

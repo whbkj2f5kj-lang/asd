@@ -49,6 +49,13 @@ class SignReader(
     private var net: SignNet? = null
     private var netTried = false
 
+    /** Empfindlichkeit: ab welcher Netz-Sicherheit eine unscharfe Sichtung mitzählt … */
+    @Volatile var minWeakP = 0.5f
+    /** … und wie viele Punkte (sicher = 1, sehr sicher = 2, unsicher = 0,5) für die Anzeige nötig sind */
+    @Volatile var needed = 1.5f
+    /** Jede einzelne Tempo-Sichtung (Wert, Sicherheit) – für die vorläufige Anzeige */
+    @Volatile var onSighting: ((Int, Float) -> Unit)? = null
+
     /** Debug-Aufnahme: jede Entscheidung als JSON-Zeile (null = aus) */
     @Volatile var debug: ((String) -> Unit)? = null
 
@@ -182,7 +189,7 @@ class SignReader(
                 } else netV
             } else {
                 // Texterkennung ist teuer: nur wenn das Netz gar nichts weiß und das Schild groß genug ist
-                val netGuess = cr?.takeIf { it.p >= 0.5f }?.speed
+                val netGuess = cr?.takeIf { it.p >= minWeakP }?.speed
                 if (netGuess != null) { weakHit = true; netGuess }
                 else if (cr == null || bl.w >= 22) cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
                 else null
@@ -191,6 +198,7 @@ class SignReader(
             var active = true
             if (v != null) {
                 supplement(full, px, sw, sh, bl, scale, now, hour)?.let { (nt, ac) -> note = nt; active = ac }
+                runCatching { onSighting?.invoke(v, cr?.p ?: 0.6f) }
                 val ev = SignEvent.Limit(v, note, active)
                 events += ev
                 if (sure && cr!!.p >= 0.97f && cr.speed == v) strong += ev.key
@@ -220,7 +228,8 @@ class SignReader(
                 val cr = whiteResults[wi]
                 // Innenfläche eines Tempo-Schilds: der rote Ring ist bei vielen Kameras zu dünn/blass für die Ringsuche
                 val spd = cr?.speed
-                if (cr != null && spd != null && cr.p >= 0.5f) {
+                if (cr != null && spd != null && cr.p >= minWeakP) {
+                    runCatching { onSighting?.invoke(spd, cr.p) }
                     // Zusatzzeichen sitzt unter dem ganzen Schild (Ring ca. 14 % breiter als die Innenfläche)
                     val gx = (bl.w * 0.14f).toInt(); val gy = (bl.h * 0.14f).toInt()
                     val outer = SignShapes.Blob(max(0, bl.minX - gx), max(0, bl.minY - gy), minOf(sw - 1, bl.maxX + gx), minOf(sh - 1, bl.maxY + gy), bl.count)
@@ -316,7 +325,7 @@ class SignReader(
         val sums = HashMap<String, Float>()
         for ((_, e, w) in weighted) sums[e.key] = (sums[e.key] ?: 0f) + w
         for ((key, sum) in sums) {
-            if (sum < 2f) continue
+            if (sum < needed - 1e-3f) continue
             val last = lastEmit[key]
             if (last != null && now - last < 15_000) continue
             lastEmit[key] = now

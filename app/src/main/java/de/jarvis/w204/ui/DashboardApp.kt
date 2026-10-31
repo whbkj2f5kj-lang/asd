@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -506,7 +507,17 @@ private fun ScenePanel(
         }
 
         Column(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            SpeedLimitSign(limit, over, Modifier.size(62.dp).clickable { vm.clearLimit() })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SpeedLimitSign(limit, over, Modifier.size(62.dp).clickable { vm.clearLimit() })
+                val prov by vm.provisional.collectAsStateWithLifecycle()
+                if (prov != null) {
+                    Box(Modifier.padding(start = 8.dp).size(42.dp).alpha(0.55f), contentAlignment = Alignment.TopEnd) {
+                        SpeedLimitSign(prov, false, Modifier.fillMaxSize())
+                        Text("?", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(CircleShape).background(Color(0xFF444444)).padding(horizontal = 5.dp))
+                    }
+                }
+            }
             val noPass by vm.noPassing.collectAsStateWithLifecycle()
             if (noPass) NoPassingSign(Modifier.padding(top = 6.dp).size(40.dp).clickable { vm.noPassing.value = false })
             val note by vm.limitNote.collectAsStateWithLifecycle()
