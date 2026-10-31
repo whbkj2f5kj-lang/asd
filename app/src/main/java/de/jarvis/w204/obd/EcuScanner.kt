@@ -38,7 +38,7 @@ object ReadOnly {
      * Alles andere (Fehler löschen 04/14, Codieren 2E/3B, Routinen 31, Stellglieder 2F/30,
      * Sitzungen 10, Freischaltung 27, Reset 11 …) ist gesperrt.
      */
-    private val allowed = setOf("01", "03", "07", "09", "0A", "18", "1A", "21", "22")
+    private val allowed = setOf("01", "03", "06", "07", "09", "0A", "18", "1A", "21", "22")
 
     /** Persönliche Kennungen werden nie gelesen: FIN (F190, F1A0) und Seriennummer (F18C). */
     val privateDids = setOf(0xF190, 0xF1A0, 0xF18C)
@@ -97,19 +97,23 @@ class SafeElm internal constructor(private val e: Elm327) {
      */
     fun probe(cmd: String, timeoutMs: Long = 1500): String {
         val c = cmd.uppercase()
-        val ok = c in setOf("ATI", "AT@1", "ATDP", "ATDPN", "ATH1", "ATH0", "ATCRA") ||
+        val ok = c in setOf("ATI", "AT@1", "ATDP", "ATDPN", "ATH1", "ATH0", "ATCRA", "ATST19", "ATST32") ||
             c.matches(Regex("ATSH7E[0-7]|ATSH7DF|ATCRA7E[89A-F]"))
         require(ok) { "Befehl im Test nicht erlaubt: $cmd" }
         if (c.startsWith("ATSH")) header = c.removePrefix("ATSH")
         if (c == "ATH1") headersOn = true
+        if (c == "ATST19") shortTimeout = true
+        if (c == "ATST32") shortTimeout = false
         if (c == "ATH0") headersOn = false
         return e.send(c, timeoutMs)
     }
 
     private var headersOn = false
+    private var shortTimeout = false
 
     internal fun restore() {
         if (headersOn) { runCatching { e.send("ATH0") }; headersOn = false }
+        if (shortTimeout) { runCatching { e.send("ATST32") }; shortTimeout = false }
         if (header != null && header != "7DF") {
             runCatching { e.send("ATCRA") }
             runCatching { e.send("ATSH7DF") }
@@ -359,6 +363,10 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
             line("ATCRA", e.probe("ATCRA"))
             line("ATSH7DF", e.probe("ATSH7DF"))
             line("22F100 (Rundruf)", runCatching { e.request("22F100", 2500) }.getOrElse { "Fehler: ${it.message}" })
+            // welche Standard-Messwerte (Mode 01) und Prüfergebnisse (Mode 06) kennt das Auto?
+            for (cmd in listOf("0100", "0120", "0140", "0160", "0180", "01A0", "01C0", "0600", "0620", "0640", "0660", "0680", "06A0")) {
+                line("$cmd (Rundruf)", runCatching { e.request(cmd, 2000) }.getOrElse { "Fehler: ${it.message}" })
+            }
             for (h in listOf("7E0", "7E1", "7E2")) {
                 line("ATSH$h", e.probe("ATSH$h"))
                 line("ATCRA (aus)", e.probe("ATCRA"))
@@ -407,7 +415,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 when (mode) {
                     Mode.QUICK -> { add(Task(ecu, 0x21, 0x00..0xFF, resumable = false)); add(Task(ecu, 0x22, 0xF100..0xF1FF, resumable = false)) }
                     Mode.STANDARD -> { add(Task(ecu, 0x21, 0x00..0xFF, resumable = false)); fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) } }
-                    Mode.DEEP -> fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) }
+                    Mode.DEEP -> if (ecu.header == "7E0") fullRanges.forEach { add(Task(ecu, 0x22, it, resumable = true)) }
                 }
             }
         }
@@ -415,7 +423,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
         var done = 0
 
         for (t in tasks) {
-            val resumeKey = (if (deep) "ext_" else "next_") + "${t.ecu.header}_%02X_%04X".format(t.service, t.range.first)
+            val resumeKey = (if (deep) "ext2_" else "next_") + "${t.ecu.header}_%02X_%04X".format(t.service, t.range.first)
             if (t.ecu.header in rejected) { done += t.range.count(); continue }
             var id = if (t.resumable) prefs.getInt(resumeKey, t.range.first).coerceIn(t.range.first, t.range.last + 1) else t.range.first
             done += id - t.range.first
@@ -430,6 +438,8 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 var refused = false
                 val replies = adapter { e ->
                     if (deep && !ensureExtended(e, t.ecu.header)) { refused = true; return@adapter emptyList() }
+                    // unbekannte Nummern bleiben unbeantwortet: Adapter nur 100 ms warten lassen statt 200 ms
+                    if (deep) runCatching { e.probe("ATST19") }
                     e.target(t.ecu.header)
                     (first..end).filter { !(t.service == 0x22 && it in ReadOnly.privateDids) }.map { i ->
                         val cmd = if (t.service == 0x21) "21%02X".format(i) else "22%04X".format(i)
@@ -467,7 +477,7 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 _state.update { it.copy(progress = done / total, hits = hits.size, phase = "${t.ecu.name}: Dienst %02X · %d gefunden".format(t.service, hits.size)) }
 
                 // Dienst kennt das Steuergerät nicht oder es schweigt komplett -> Rest überspringen
-                if (notSupported >= 10 || (!answered && asked >= 50)) {
+                if (notSupported >= 10 || (!deep && !answered && asked >= 50)) {
                     done += t.range.last - id + 1
                     if (t.resumable) prefs.edit().putInt(resumeKey, t.range.last + 1).apply()
                     break

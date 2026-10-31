@@ -126,7 +126,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     ScanOption(
                         title = "Tiefen-Scan",
                         badge = "EMPFOHLEN",
-                        text = "Erweiterte Diagnosesitzung wie in der Werkstatt – hier geben Mercedes-Steuergeräte ihre Messwerte frei (DPF, Öl, Getriebe). Weiterhin nur lesen. Im Stand mit laufendem Motor, Wählhebel P. Dauert lange, kann angehalten und fortgesetzt werden.",
+                        text = "Erweiterte Diagnosesitzung wie in der Werkstatt – hier geben Mercedes-Steuergeräte ihre Messwerte frei (DPF, Öl). Prüft alle 65.536 Nummern des Motorsteuergeräts, nur lesen. Im Stand mit laufendem Motor, Wählhebel P. Dauert ca. 2–3 Stunden, kann jederzeit angehalten und später fortgesetzt werden.",
                         enabled = !scan.busy,
                         highlight = true,
                     ) { vm.scanner.scan(de.jarvis.w204.obd.EcuScanner.Mode.DEEP) }
