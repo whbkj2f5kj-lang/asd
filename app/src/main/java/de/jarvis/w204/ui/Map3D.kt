@@ -112,7 +112,7 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
                     lastLoad = now
                 }
             }
-            delay(50)
+            delay(66)   // ~15 Bilder/s reichen für eine ruhige Kartenbewegung
         }
     }
 
@@ -336,7 +336,8 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
         for (i in 0 until n) if (i == 0) roof.moveTo(top[i].x, top[i].y) else roof.lineTo(top[i].x, top[i].y)
         roof.close()
         drawPath(roof, MapC.roof.copy(alpha = fogA))
-        drawPath(roof, MapC.roofEdge.copy(alpha = 0.4f * fogA), style = Stroke(width = 1.2f))
+        // Dachkante nur in der Nähe (spart Zeichenaufrufe auf dem Radio)
+        if (v.dist < 350f * 350f) drawPath(roof, MapC.roofEdge.copy(alpha = 0.4f * fogA), style = Stroke(width = 1.2f))
     }
 
     // ---------- eigenes Auto: flacher Pfeil auf der Straße mit Lichtschein
