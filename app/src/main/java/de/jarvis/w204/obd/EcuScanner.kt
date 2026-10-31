@@ -45,6 +45,11 @@ object ReadOnly {
 
     fun isAllowed(cmd: String): Boolean {
         val c = cmd.uppercase().replace(" ", "")
+        if (c.startsWith("22") && (c.length == 10 || c.length == 14)) {
+            // Sammelabfrage: 2–3 Nummern in einer Anfrage (nur Lesen), keine davon privat
+            if (!c.all { it in "0123456789ABCDEF" }) return false
+            return c.substring(2).chunked(4).none { it.toInt(16) in privateDids }
+        }
         if (c.length == 6 && c.startsWith("22") && c.substring(2).toIntOrNull(16) in privateDids) return false
         if (c == "0902") return false   // OBD-FIN
         if (c.length < 2 || c.length > 8 || c.length % 2 != 0) return false
@@ -97,12 +102,12 @@ class SafeElm internal constructor(private val e: Elm327) {
      */
     fun probe(cmd: String, timeoutMs: Long = 1500): String {
         val c = cmd.uppercase()
-        val ok = c in setOf("ATI", "AT@1", "ATDP", "ATDPN", "ATH1", "ATH0", "ATCRA", "ATST19", "ATST32") ||
+        val ok = c in setOf("ATI", "AT@1", "ATDP", "ATDPN", "ATH1", "ATH0", "ATCRA", "ATST0C", "ATST19", "ATST32") ||
             c.matches(Regex("ATSH7E[0-7]|ATSH7DF|ATCRA7E[89A-F]"))
         require(ok) { "Befehl im Test nicht erlaubt: $cmd" }
         if (c.startsWith("ATSH")) header = c.removePrefix("ATSH")
         if (c == "ATH1") headersOn = true
-        if (c == "ATST19") shortTimeout = true
+        if (c == "ATST19" || c == "ATST0C") shortTimeout = true
         if (c == "ATST32") shortTimeout = false
         if (c == "ATH0") headersOn = false
         return e.send(c, timeoutMs)
@@ -425,6 +430,21 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
         val total = tasks.sumOf { it.range.count() }.toFloat()
         var done = 0
 
+        // Turbo: kann das Steuergerät 3 Nummern pro Anfrage? (Test mit bekannten Kennungen)
+        var multi = false
+        if (deep && tasks.isNotEmpty()) {
+            val h0 = tasks.first().ecu.header
+            multi = runCatching {
+                adapter { e ->
+                    if (!ensureExtended(e, h0)) return@adapter false
+                    e.target(h0)
+                    val r = DiagParser.parse(e.request("22F100F150F151", 1500), 0x22)
+                    r is DiagParser.Reply.Positive && r.hex.startsWith("62F100") && "F150" in r.hex
+                }
+            }.getOrDefault(false)
+            _state.update { it.copy(phase = if (multi) "Turbo: 3 Nummern pro Anfrage" else "Einzelabfrage (Steuergerät kann keine Sammelabfrage)") }
+        }
+
         for (t in tasks) {
             val resumeKey = (if (deep) "ext2_" else "next_") + "${t.ecu.header}_%02X_%04X".format(t.service, t.range.first)
             if (t.ecu.header in rejected) { done += t.range.count(); continue }
@@ -436,18 +456,33 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
 
             while (id <= t.range.last) {
                 currentCoroutineContext().ensureActive()
-                val end = min(id + 7, t.range.last)
+                val useMulti = deep && multi && t.service == 0x22
+                val end = min(id + (if (useMulti) 23 else 7), t.range.last)
                 val first = id
                 var refused = false
                 val replies = adapter { e ->
                     if (deep && !ensureExtended(e, t.ecu.header)) { refused = true; return@adapter emptyList() }
-                    // unbekannte Nummern bleiben unbeantwortet: Adapter nur 100 ms warten lassen statt 200 ms
-                    if (deep) runCatching { e.probe("ATST19") }
+                    // unbekannte Nummern bleiben unbeantwortet: Adapter nur kurz warten lassen
+                    if (deep) runCatching { e.probe(if (useMulti) "ATST0C" else "ATST19") }
                     e.target(t.ecu.header)
-                    (first..end).filter { !(t.service == 0x22 && it in ReadOnly.privateDids) }.map { i ->
+                    val ids = (first..end).filter { !(t.service == 0x22 && it in ReadOnly.privateDids) }
+                    fun single(i: Int): Pair<Int, DiagParser.Reply> {
                         val cmd = if (t.service == 0x21) "21%02X".format(i) else "22%04X".format(i)
-                        i to DiagParser.parse(e.request(cmd, 1000), t.service)
+                        return i to DiagParser.parse(e.request(cmd, 1000), t.service)
                     }
+                    if (!useMulti) return@adapter ids.map { single(it) }
+                    // 3 Nummern pro Anfrage; nur wenn etwas zurückkommt, einzeln nachfragen
+                    val out = ArrayList<Pair<Int, DiagParser.Reply>>()
+                    for (g in ids.chunked(3)) {
+                        val rep = DiagParser.parse(e.request("22" + g.joinToString("") { "%04X".format(it) }, 1000), 0x22)
+                        when {
+                            rep is DiagParser.Reply.Positive -> g.forEach { out += single(it) }
+                            rep is DiagParser.Reply.Negative && rep.nrc == 0x13 -> { multi = false; g.forEach { out += single(it) } }
+                            rep is DiagParser.Reply.Negative && rep.nrc !in setOf(0x11, 0x12, 0x31, 0x78) -> g.forEach { out += single(it) }
+                            else -> {}   // keine der drei vorhanden
+                        }
+                    }
+                    out
                 }
                 if (refused) {
                     // Steuergerät erlaubt die erweiterte Sitzung nicht (z. B. Fahrzeug fährt) -> Rest überspringen

@@ -105,4 +105,13 @@ class DtcTest {
             org.junit.Assert.assertFalse(it, de.jarvis.w204.obd.ReadOnly.isAllowed(it))
         }
     }
+
+    @Test fun multiDidReadAllowedButNeverPrivate() {
+        org.junit.Assert.assertTrue(ReadOnly.isAllowed("22F100F150F151"))
+        org.junit.Assert.assertTrue(ReadOnly.isAllowed("2210001001"))
+        org.junit.Assert.assertFalse(ReadOnly.isAllowed("22F100F190"))          // FIN versteckt in Sammelabfrage
+        org.junit.Assert.assertFalse(ReadOnly.isAllowed("22F18CF100F150"))      // Seriennummer
+        org.junit.Assert.assertFalse(ReadOnly.isAllowed("2E10001001"))          // Schreiben bleibt gesperrt
+        org.junit.Assert.assertFalse(ReadOnly.isAllowed("22100010011002"  + "1003"))  // mehr als 3 Nummern
+    }
 }
