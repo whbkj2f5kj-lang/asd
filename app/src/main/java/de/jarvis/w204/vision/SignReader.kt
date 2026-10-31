@@ -93,6 +93,8 @@ class SignReader(
         val scale = full.width.toFloat() / sw
         val boxes = ArrayList<SignBox>()
         val events = ArrayList<SignEvent>()
+        // vom Netz sehr sicher erkannt -> zählt schon nach einer Sichtung (Stadt: Schild nur kurz im Bild)
+        val strong = HashSet<String>()
 
         fun norm(bl: SignShapes.Blob) = floatArrayOf(
             bl.minX * scale / full.width, bl.minY * scale / full.height,
@@ -109,7 +111,7 @@ class SignReader(
         // ---------- 1) rote Ringe: Tempolimits
         val red = BooleanArray(sw * sh)
         for (i in 0 until sw * rows) red[i] = SignShapes.isRed(px[i])
-        val rings = SignShapes.blobs(red, sw, rows).filter { bl ->
+        val rings = SignShapes.blobs(red, sw, rows, 20).filter { bl ->
             if (bl.w < 10 || bl.h < 10 || bl.w > sw / 3) return@filter false
             if (bl.aspect < 0.7f || bl.aspect > 1.4f) return@filter false
             if (bl.fill < 0.12f || bl.fill > 0.62f) return@filter false
@@ -132,6 +134,7 @@ class SignReader(
             val sure = cr != null && cr.p >= 0.85f
             if (sure && cr!!.cls == SignNet.NO_PASSING) {
                 events += SignEvent.NoPassing
+                if (cr.p >= 0.97f) strong += SignEvent.NoPassing.key
                 boxes += SignBox(n[0], n[1], n[2], n[3], null, "Überholverbot")
                 continue
             }
@@ -166,7 +169,9 @@ class SignReader(
                         }
                     }
                 }
-                events += SignEvent.Limit(v, note, active)
+                val ev = SignEvent.Limit(v, note, active)
+                events += ev
+                if (sure && cr!!.p >= 0.97f && cr.speed == v) strong += ev.key
             }
             boxes += SignBox(n[0], n[1], n[2], n[3], v, note)
         }
@@ -188,6 +193,11 @@ class SignReader(
                 // zuerst das Netz fragen (kennt Ende 80, Ende aller Verbote, Ende Überholverbot)
                 val cr = classify(full, n, 0.15f)
                 if (cr != null && cr.p >= 0.8f) {
+                    if (cr.p >= 0.97f) when (cr.cls) {
+                        SignNet.END_ALL -> strong += SignEvent.EndAll.key
+                        SignNet.END_80 -> strong += SignEvent.EndLimit(80).key
+                        SignNet.END_NO_PASSING -> strong += SignEvent.EndNoPassing.key
+                    }
                     when (cr.cls) {
                         SignNet.END_ALL -> { events += SignEvent.EndAll; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende"); return@forEach }
                         SignNet.END_80 -> { events += SignEvent.EndLimit(80); boxes += SignBox(n[0], n[1], n[2], n[3], 80, "Ende"); return@forEach }
@@ -217,7 +227,7 @@ class SignReader(
             boxes += SignBox(n[0], n[1], n[2], n[3], null, if (t.exit) "Ortsende" else name)
         }
 
-        confirm(now, events)
+        confirm(now, events, strong)
         return boxes
     }
 
@@ -228,12 +238,12 @@ class SignReader(
     // ---------------------------------------------------------------- Bestätigung
 
     /** Ein Ereignis zählt erst, wenn es ≥ 2× in 2,5 s gesehen wurde; danach 15 s Ruhe für dasselbe. */
-    private fun confirm(now: Long, events: List<SignEvent>) {
+    private fun confirm(now: Long, events: List<SignEvent>, strong: Set<String> = emptySet()) {
         events.forEach { history.addLast(now to it) }
         while (history.isNotEmpty() && now - history.first().first > 2500) history.removeFirst()
         val counts = history.groupingBy { it.second.key }.eachCount()
         for ((key, c) in counts) {
-            if (c < 2) continue
+            if (c < 2 && key !in strong) continue
             val last = lastEmit[key]
             if (last != null && now - last < 15_000) continue
             lastEmit[key] = now

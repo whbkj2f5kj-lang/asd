@@ -179,7 +179,15 @@ class VisionPipeline(
                 laneResult = lanes.detect(px, sw, sh, calibration, now)
             }
 
-            val signBoxes = if (signsEnabled) signs.detect(bmp, px, sw, sh, now, objects) else emptyList()
+            // Schilder in doppelter Auflösung suchen: in der Stadt sind sie klein und nur kurz im Bild
+            val signBoxes = if (signsEnabled) {
+                val ssw = minOf(SIGN_WIDTH, bmp.width)
+                val ssh = max(1, bmp.height * ssw / bmp.width)
+                val sbmp = if (ssw == sw) small else Bitmap.createScaledBitmap(bmp, ssw, ssh, true)
+                val spx = IntArray(ssw * ssh)
+                sbmp.getPixels(spx, 0, ssw, 0, 0, ssw, ssh)
+                signs.detect(bmp, spx, ssw, ssh, now, objects)
+            } else emptyList()
 
             onFrame(VisionFrame(bmp.width, bmp.height, signBoxes, objects, laneResult))
         }
@@ -204,6 +212,7 @@ class VisionPipeline(
     companion object {
         private const val TAG = "VisionPipeline"
         private const val SCAN_WIDTH = 320
+        private const val SIGN_WIDTH = 640
         private const val MIN_INTERVAL_MS = 110L
         private const val PREVIEW_INTERVAL_MS = 30L
     }

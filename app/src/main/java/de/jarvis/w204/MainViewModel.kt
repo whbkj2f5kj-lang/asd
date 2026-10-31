@@ -197,6 +197,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             crashReport.value = report to off
         }
         vision.recorder = dashcam
+        dashcam.overlayBoxes = { _visionFrame.value?.signs ?: emptyList() }
         dashcam.overlayText = {
             val v = obd.vehicle.value
             listOfNotNull(v.speed?.let { "$it km/h" }, _speedLimit.value?.let { "Limit $it" }).joinToString("   ")

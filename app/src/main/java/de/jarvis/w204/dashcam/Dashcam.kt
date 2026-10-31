@@ -75,6 +75,10 @@ class Dashcam(context: Context, scope: CoroutineScope) {
     /** Text für die Einblendung (z. B. "87 km/h"), wird vom ViewModel gesetzt */
     @Volatile var overlayText: () -> String = { "" }
 
+    /** Erkannte Schild-Kandidaten (normiert 0..1) – werden zur Kontrolle mit ins Video gezeichnet */
+    @Volatile var overlayBoxes: () -> List<de.jarvis.w204.vision.SignBox> = { emptyList() }
+    private val boxPaint2 = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.YELLOW }
+
     @Volatile private var cfg = Config()
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "dashcam").apply { priority = Thread.NORM_PRIORITY - 1 } }
     private val busy = AtomicBoolean(false)
@@ -219,6 +223,18 @@ class Dashcam(context: Context, scope: CoroutineScope) {
 
     private fun drawOverlay(c: android.graphics.Canvas) {
         val h = dst.height()
+        val w = dst.width()
+        runCatching {
+            for (b in overlayBoxes()) {
+                boxPaint2.color = if (b.value != null || b.label != null) Color.GREEN else Color.YELLOW
+                c.drawRect(b.l * w, b.t * h, b.r * w, b.b * h, boxPaint2)
+                val txt = listOfNotNull(b.value?.toString(), b.label).joinToString(" ")
+                if (txt.isNotEmpty()) {
+                    textPaint.textSize = (h * 0.03f).coerceAtLeast(12f)
+                    c.drawText(txt, b.l * w, (b.t * h - 4f).coerceAtLeast(textPaint.textSize), textPaint)
+                }
+            }
+        }
         val size = (h * 0.035f).coerceAtLeast(14f)
         textPaint.textSize = size
         val text = stamp.format(Date()) + "   " + overlayText()
