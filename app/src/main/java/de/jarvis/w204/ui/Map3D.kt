@@ -150,13 +150,19 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
             }
         }
         val hint = when {
-            p == null && !ms.running -> "Karte: GPS aus (Einstellungen)"
-            p == null -> "Warte auf GPS …"
-            ways.isEmpty() -> "Kartendaten werden geladen …"
+            p == null && !ms.running -> "Karte: GPS aus (Einstellungen → Tempolimits aus Karte)"
+            p == null -> "Warte auf GPS …\n${ms.gps}"
+            ways.isEmpty() && ms.error != null -> "Keine Kartendaten: ${ms.error}\n(Internet/Hotspot am Radio prüfen)"
+            ways.isEmpty() && ms.tiles == 0 -> "Kartendaten werden geladen …\n${if (ms.loading) "Download läuft" else "noch keine Kartenstücke"}"
+            ways.isEmpty() -> "Keine Straßen an dieser Position (${ms.tiles} Kartenstücke geladen)"
             else -> null
         }
         hint?.let {
-            Text(it, color = J.dim, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
+            Text(
+                it, color = J.text, fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(14.dp)).background(Color(0xCC0B1424)).padding(horizontal = 16.dp, vertical = 10.dp),
+            )
         }
     }
 }
