@@ -50,6 +50,8 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val tiles: Int = 0,
         val loading: Boolean = false,
         val error: String? = null,
+        /** OSM-Straßenart der zugeordneten Straße (motorway, primary, residential …) */
+        val highway: String? = null,
         val lat: Double? = null,
         val lon: Double? = null,
         val acc: Int? = null,
@@ -261,6 +263,7 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
             gps = gpsText,
             road = cur?.way?.label ?: cur?.let { roadType(it.way.highway) },
             roadKey = cur?.way?.roadKey,
+            highway = cur?.way?.highway,
             limit = cur?.let { MaxSpeed.limitFor(it.way, it.forward, dow, minute) },
             tiles = tiles.size,
             loading = !tileLoaded,

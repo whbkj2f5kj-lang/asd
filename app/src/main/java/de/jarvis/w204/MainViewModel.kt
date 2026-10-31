@@ -243,7 +243,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         vision.recorder = dashcam
         // vorläufige Anzeige: was die Kamera gerade zu sehen glaubt (ohne Ansage/Warnung)
         vision.onSignSighting = { v, p ->
-            if (_settings.value.signProvisional && v != _speedLimit.value) {
+            val pm = plausibleMax()
+            if (_settings.value.signProvisional && v != _speedLimit.value && (pm == null || v <= pm)) {
                 provisional.value = v
                 provisionalAt = SystemClock.elapsedRealtime()
             }
@@ -411,12 +412,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Höchstes Tempolimit, das an dieser Stelle plausibel ist (null = keine Einschränkung).
+     * Verhindert z. B. "120" mitten in der Stadt (das Netz verwechselt gelegentlich 20/120).
+     */
+    fun plausibleMax(): Int? {
+        val ms = map.state.value
+        return de.jarvis.w204.map.Plausibility.maxLimit(
+            highway = if (ms.hasFix) ms.highway else null,
+            urban = inTown ?: ms.limit?.urban,
+            map = if (ms.hasFix) ms.limit else null,
+        )
+    }
+
+    /** Wiederholt "unplausibel" gesehen -> Karte ist evtl. veraltet: nach 3 Bestätigungen in 60 s doch übernehmen */
+    private val implausible = HashMap<Int, ArrayDeque<Long>>()
+
+    private fun plausible(v: Int): Boolean {
+        val max = plausibleMax() ?: return true
+        if (v <= max) return true
+        val now = SystemClock.elapsedRealtime()
+        val q = implausible.getOrPut(v) { ArrayDeque() }
+        q.addLast(now)
+        while (q.isNotEmpty() && now - q.first() > 60_000) q.removeFirst()
+        if (debugLog.active) debugLog.log("{\"k\":\"rej\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"v\":$v,\"max\":$max,\"n\":${q.size}}")
+        return q.size >= 3
+    }
+
     private fun onSignEvent(e: de.jarvis.w204.vision.SignEvent) {
         if (debugLog.active) debugLog.log("{\"k\":\"sev\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"e\":\"${e.toString().replace("\"", "'")}\"}")
         when (e) {
             is de.jarvis.w204.vision.SignEvent.Limit -> {
                 when {
                     e.note == "Lkw" -> return                     // gilt nicht für Pkw
+                    !plausible(e.value) -> return                 // passt nicht zur Umgebung (Stadt, Wohnstraße, Kartenlimit)
                     e.note != null && !e.active -> return         // Uhrzeit passt gerade nicht
                     limitSource.value == 1 && _speedLimit.value == e.value && limitNote.value == e.note -> return
                     e.note == "bei Nässe" -> setLimit(e.value, e.note, "Tempolimit ${e.value} bei Nässe.")
