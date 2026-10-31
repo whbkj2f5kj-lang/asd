@@ -77,12 +77,23 @@ fun CameraFeed(
                 // Kein CameraX-Preview: manche Radios melden eine Bildschirmdrehung von 359°,
                 // daran stürzt die Vorschau-Ausrichtung ab. Wir zeigen die Analysebilder selbst an
                 // und legen die Drehung fest auf 0°.
-                val analysis = ImageAnalysis.Builder()
+                val builder = ImageAnalysis.Builder()
                     .setResolutionSelector(resolution)
                     .setTargetRotation(Surface.ROTATION_0)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .build()
+                // Möglichst hohe Mindest-Bildrate erzwingen: kürzere Belichtung -> weniger Bewegungsunschärfe bei Fahrt
+                runCatching {
+                    val info = infos[ids.indexOf(wanted)]
+                    val ranges = Camera2CameraInfo.from(info)
+                        .getCameraCharacteristic(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                    val best = ranges?.filter { it.upper <= 30 }?.maxWithOrNull(compareBy({ it.lower }, { it.upper }))
+                    if (best != null && best.lower >= 15) {
+                        androidx.camera.camera2.interop.Camera2Interop.Extender(builder)
+                            .setCaptureRequestOption(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, best)
+                    }
+                }
+                val analysis = builder.build()
                 analysis.setAnalyzer(executor, vision)
 
                 CrashGuard.guard("camera") {

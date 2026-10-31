@@ -95,6 +95,8 @@ class SignReader(
         val events = ArrayList<SignEvent>()
         // vom Netz sehr sicher erkannt -> zählt schon nach einer Sichtung (Stadt: Schild nur kurz im Bild)
         val strong = HashSet<String>()
+        // unscharfes Bild, Netz nur mäßig sicher -> zählt halb (mehrere Sichtungen nötig)
+        val weak = HashSet<String>()
 
         fun norm(bl: SignShapes.Blob) = floatArrayOf(
             bl.minX * scale / full.width, bl.minY * scale / full.height,
@@ -132,6 +134,7 @@ class SignReader(
             if (onVehicle(n)) { boxes += SignBox(n[0], n[1], n[2], n[3], null, "Fahrzeug"); continue }
             val cr = classify(full, n, 0.12f)
             val sure = cr != null && cr.p >= 0.85f
+            var weakHit = false
             if (sure && cr!!.cls == SignNet.NO_PASSING) {
                 events += SignEvent.NoPassing
                 if (cr.p >= 0.97f) strong += SignEvent.NoPassing.key
@@ -143,12 +146,16 @@ class SignReader(
             val v: Int? = if (sure) {
                 val netV = cr!!.speed!!
                 // 130, 110, 90, 40, 10 kennt das Netz nicht – bei ähnlichen Ziffern die Texterkennung fragen
-                if (netV in setOf(30, 100, 120)) {
+                if (netV in setOf(100, 120)) {
                     val ocr = cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
                     if (ocr != null && ocr in NOT_IN_NET) ocr else netV
                 } else netV
             } else {
-                cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
+                // Texterkennung ist teuer: nur wenn das Netz gar nichts weiß und das Schild groß genug ist
+                val netGuess = cr?.takeIf { it.p >= 0.5f }?.speed
+                if (netGuess != null) { weakHit = true; netGuess }
+                else if (cr == null || bl.w >= 22) cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
+                else null
             }
             var note: String? = null
             var active = true
@@ -172,6 +179,7 @@ class SignReader(
                 val ev = SignEvent.Limit(v, note, active)
                 events += ev
                 if (sure && cr!!.p >= 0.97f && cr.speed == v) strong += ev.key
+                if (weakHit) weak += ev.key
             }
             boxes += SignBox(n[0], n[1], n[2], n[3], v, note)
         }
@@ -227,7 +235,7 @@ class SignReader(
             boxes += SignBox(n[0], n[1], n[2], n[3], null, if (t.exit) "Ortsende" else name)
         }
 
-        confirm(now, events, strong)
+        confirm(now, events, strong, weak)
         return boxes
     }
 
@@ -238,16 +246,26 @@ class SignReader(
     // ---------------------------------------------------------------- Bestätigung
 
     /** Ein Ereignis zählt erst, wenn es ≥ 2× in 2,5 s gesehen wurde; danach 15 s Ruhe für dasselbe. */
-    private fun confirm(now: Long, events: List<SignEvent>, strong: Set<String> = emptySet()) {
-        events.forEach { history.addLast(now to it) }
-        while (history.isNotEmpty() && now - history.first().first > 2500) history.removeFirst()
-        val counts = history.groupingBy { it.second.key }.eachCount()
-        for ((key, c) in counts) {
-            if (c < 2 && key !in strong) continue
+    private val weighted = ArrayDeque<Triple<Long, SignEvent, Float>>()
+
+    /**
+     * Ein Ereignis zählt, wenn seine Sichtungen in 2,5 s zusammen ≥ 2 Punkte ergeben:
+     * sehr sicher erkannt = 2 (sofort), normal = 1, unscharf/unsicher = 0,5. Danach 15 s Ruhe für dasselbe.
+     */
+    private fun confirm(now: Long, events: List<SignEvent>, strong: Set<String> = emptySet(), weak: Set<String> = emptySet()) {
+        for (e in events) {
+            val w = when (e.key) { in strong -> 2f; in weak -> 0.5f; else -> 1f }
+            weighted.addLast(Triple(now, e, w))
+        }
+        while (weighted.isNotEmpty() && now - weighted.first().first > 2500) weighted.removeFirst()
+        val sums = HashMap<String, Float>()
+        for ((_, e, w) in weighted) sums[e.key] = (sums[e.key] ?: 0f) + w
+        for ((key, sum) in sums) {
+            if (sum < 2f) continue
             val last = lastEmit[key]
             if (last != null && now - last < 15_000) continue
             lastEmit[key] = now
-            onEvent(history.last { it.second.key == key }.second)
+            onEvent(weighted.last { it.second.key == key }.second)
         }
     }
 

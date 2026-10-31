@@ -212,6 +212,11 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     SwitchRow("Schildererkennung", settings.signRecognition) { on -> vm.update { it.copy(signRecognition = on) } }
                     SwitchRow("Fahrzeug- und Spurerkennung", settings.objectRecognition) { on -> vm.update { it.copy(objectRecognition = on) } }
                     SwitchRow("Spurverlassenswarnung (Ton, ab 60 km/h)", settings.laneWarn) { on -> vm.update { it.copy(laneWarn = on) } }
+                    var signFps by remember { mutableStateOf(0f) }
+                    androidx.compose.runtime.LaunchedEffect(Unit) {
+                        while (true) { signFps = vm.vision.signFps; kotlinx.coroutines.delay(1000) }
+                    }
+                    Hint("Schilder-Auswertung: " + String.format(Locale.GERMANY, "%.1f", signFps) + " Bilder/s (Kamera muss laufen)")
                     Spacer(Modifier.height(6.dp))
                     Text("Kameraquelle", color = J.text, fontSize = 15.sp)
                     Spacer(Modifier.height(6.dp))

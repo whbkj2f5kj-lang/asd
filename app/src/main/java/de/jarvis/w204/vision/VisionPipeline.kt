@@ -69,7 +69,8 @@ class VisionPipeline(
             val showPreview = now - lastPreview >= previewInterval
             val rec = recorder?.takeIf { it.wantsFrame() }
             val analyse = !procBusy.get() && due()
-            if (!showPreview && !analyse && rec == null) return
+            val signDue = signDue(now)
+            if (!showPreview && !analyse && !signDue && rec == null) return
             val t0 = SystemClock.elapsedRealtime()
             var bmp = image.toBitmap()
             // Manche Radios liefern krumme Werte (z. B. 359°) – auf 0/90/180/270 runden
@@ -85,6 +86,7 @@ class VisionPipeline(
                 _preview.value = bmp.asImageBitmap()
             }
             rec?.offer(bmp)
+            if (signDue) runSigns(bmp, now)
             if (analyse) {
                 procBusy.set(true)
                 val frame = bmp
@@ -115,7 +117,9 @@ class VisionPipeline(
     fun submitRgbx(frame: ByteBuffer, width: Int, height: Int) {
         val rec = recorder?.takeIf { it.wantsFrame() }
         val analyse = !usbBusy.get() && due()
-        if (!analyse && rec == null) return
+        val now0 = SystemClock.elapsedRealtime()
+        val signDue = signDue(now0)
+        if (!analyse && rec == null && !signDue) return
         if (frame.remaining() < width * height * 4) return
         val bmp = try {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { b ->
@@ -127,6 +131,7 @@ class VisionPipeline(
             return
         }
         rec?.offer(bmp)
+        if (signDue) runSigns(bmp, now0)
         if (!analyse) return
         usbBusy.set(true)
         usbExecutor.execute {
@@ -136,6 +141,45 @@ class VisionPipeline(
                 Log.w(TAG, "Bildanalyse fehlgeschlagen", t)
             } finally {
                 usbBusy.set(false)
+            }
+        }
+    }
+
+    // ---------- Schilder: eigener Rechenstrang, so oft wie möglich (wartet nicht auf die Fahrzeugerkennung)
+    private val signExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "signs").apply { priority = Thread.NORM_PRIORITY + 1 } }
+    private val signBusy = AtomicBoolean(false)
+    @Volatile private var lastSignRun = 0L
+    @Volatile private var lastSignBoxes: List<SignBox> = emptyList()
+    @Volatile private var lastSignAt = 0L
+    @Volatile private var lastObjects: List<Detection> = emptyList()
+    private var signRuns = 0
+    @Volatile var signFps = 0f
+        private set
+
+    private fun signDue(now: Long): Boolean =
+        signsEnabled && !signBusy.get() && now - lastSignRun >= SIGN_MIN_MS
+
+    private fun runSigns(bmp: Bitmap, now: Long) {
+        if (!signBusy.compareAndSet(false, true)) return
+        val dt = now - lastSignRun
+        if (lastSignRun > 0 && dt in 1..2000) signFps = signFps * 0.8f + (1000f / dt) * 0.2f
+        lastSignRun = now
+        signExecutor.execute {
+            try {
+                val run = {
+                    val ssw = minOf(SIGN_WIDTH, bmp.width)
+                    val ssh = max(1, bmp.height * ssw / bmp.width)
+                    val sbmp = Bitmap.createScaledBitmap(bmp, ssw, ssh, true)
+                    val spx = IntArray(ssw * ssh)
+                    sbmp.getPixels(spx, 0, ssw, 0, 0, ssw, ssh)
+                    lastSignBoxes = signs.detect(bmp, spx, ssw, ssh, SystemClock.elapsedRealtime(), lastObjects)
+                    lastSignAt = SystemClock.elapsedRealtime()
+                }
+                if (signRuns++ < 3) CrashGuard.guard("ocr_run") { run() } else run()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Schildererkennung fehlgeschlagen", t)
+            } finally {
+                signBusy.set(false)
             }
         }
     }
@@ -179,15 +223,8 @@ class VisionPipeline(
                 laneResult = lanes.detect(px, sw, sh, calibration, now)
             }
 
-            // Schilder in doppelter Auflösung suchen: in der Stadt sind sie klein und nur kurz im Bild
-            val signBoxes = if (signsEnabled) {
-                val ssw = minOf(SIGN_WIDTH, bmp.width)
-                val ssh = max(1, bmp.height * ssw / bmp.width)
-                val sbmp = if (ssw == sw) small else Bitmap.createScaledBitmap(bmp, ssw, ssh, true)
-                val spx = IntArray(ssw * ssh)
-                sbmp.getPixels(spx, 0, ssw, 0, 0, ssw, ssh)
-                signs.detect(bmp, spx, ssw, ssh, now, objects)
-            } else emptyList()
+            lastObjects = objects
+            val signBoxes = if (signsEnabled && now - lastSignAt < 1000) lastSignBoxes else emptyList()
 
             onFrame(VisionFrame(bmp.width, bmp.height, signBoxes, objects, laneResult))
         }
@@ -205,6 +242,7 @@ class VisionPipeline(
     fun close() {
         usbExecutor.shutdown()
         procExecutor.shutdown()
+        signExecutor.shutdown()
         signs.close()
         vehicles?.close()
     }
@@ -213,6 +251,7 @@ class VisionPipeline(
         private const val TAG = "VisionPipeline"
         private const val SCAN_WIDTH = 320
         private const val SIGN_WIDTH = 640
+        private const val SIGN_MIN_MS = 50L
         private const val MIN_INTERVAL_MS = 110L
         private const val PREVIEW_INTERVAL_MS = 30L
     }
