@@ -258,7 +258,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 debugLog.log(
                     "{\"k\":\"st\",\"t\":${de.jarvis.w204.vision.DebugTime.now()},\"kmh\":${v.speed},\"rpm\":${v.rpm},\"lim\":${_speedLimit.value}," +
                         "\"note\":\"${limitNote.value ?: ""}\",\"src\":${limitSource.value},\"np\":${noPassing.value}," +
-                        "\"gps\":{\"fix\":${ms.hasFix},\"lat\":$lat,\"lon\":$lon,\"acc\":${ms.acc},\"road\":\"$road\",\"map\":${ms.limit?.kmh},\"txt\":\"${ms.gps.replace("\"", "'")}\"}," +
+                        "\"gps\":{\"fix\":${ms.hasFix},\"lat\":$lat,\"lon\":$lon,\"acc\":${ms.acc},\"road\":\"$road\",\"map\":${ms.limit?.kmh},\"tiles\":${ms.tiles},\"load\":${ms.loading},\"err\":\"${(ms.error ?: "").replace("\"", "'")}\",\"txt\":\"${ms.gps.replace("\"", "'")}\"}," +
                         "\"sfps\":${f2(vision.signFps)},\"dc\":\"${dashcam.status.value.message}\",\"dcfps\":${dashcam.status.value.fps}," +
                         "\"perf\":{\"cam\":${f2(vision.gov.cameraFps)},\"sms\":${f2(vision.gov.signMs)},\"sw\":${vision.gov.signWidth},\"vint\":${vision.gov.vehicleIntervalMs},\"vms\":${f2(vision.gov.vehicleMs)},\"lms\":${f2(vision.gov.laneMs)},\"cpu\":${f2(vision.gov.appCpu)},\"temp\":${f2(vision.gov.tempC)}}}"
                 )

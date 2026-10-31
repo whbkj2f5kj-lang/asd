@@ -64,6 +64,18 @@ class SignReader(
         return net
     }
 
+    /** Mehrere Kandidaten gleichzeitig vom Netz prüfen lassen (nutzt freie Prozessorkerne) */
+    private val pool = java.util.concurrent.Executors.newFixedThreadPool(3) { r -> Thread(r, "signnet").apply { priority = Thread.NORM_PRIORITY + 1 } }
+
+    private fun classifyAll(full: Bitmap, boxes: List<FloatArray>, pad: Float): List<SignNet.Result?> {
+        if (boxes.isEmpty()) return emptyList()
+        if (net() == null) return boxes.map { null }
+        if (boxes.size == 1) return listOf(classify(full, boxes[0], pad))
+        return runCatching {
+            pool.invokeAll(boxes.map { b -> java.util.concurrent.Callable { classify(full, b, pad) } }).map { it.get() }
+        }.getOrElse { boxes.map { b -> classify(full, b, pad) } }
+    }
+
     /** Schildausschnitt (mit [pad] Rand je Seite) vom Netz bestimmen lassen. */
     private fun classify(full: Bitmap, n: FloatArray, pad: Float): SignNet.Result? {
         val nn = net() ?: return null
@@ -145,10 +157,11 @@ class SignReader(
         }.sortedByDescending { it.w * it.h }.take(3)
         debug?.invoke("{\"k\":\"sr\",\"t\":${DebugTime.now()},\"w\":$sw,\"rings\":${rings.size}}")
 
-        for (bl in rings) {
+        val ringResults = classifyAll(full, rings.map { norm(it) }, 0.12f)
+        for ((ri, bl) in rings.withIndex()) {
             val n = norm(bl)
             if (onVehicle(n)) { boxes += SignBox(n[0], n[1], n[2], n[3], null, "Fahrzeug"); dbgCand("ring", n, bl.w, null, "Fahrzeug"); continue }
-            val cr = classify(full, n, 0.12f)
+            val cr = ringResults[ri]
             val sure = cr != null && cr.p >= 0.85f
             var weakHit = false
             if (sure && cr!!.cls == SignNet.NO_PASSING) {
@@ -177,22 +190,7 @@ class SignReader(
             var note: String? = null
             var active = true
             if (v != null) {
-                SignShapes.supplementBelow(px, sw, sh, bl)?.let { s ->
-                    val sn = floatArrayOf(s[0] * scale / full.width, s[1] * scale / full.height, (s[2] + 1) * scale / full.width, (s[3] + 1) * scale / full.height)
-                    val text = cachedText("Z", sn, now) { readText(full, sn, 0f) }
-                    if (text != null) {
-                        val sup = SignShapes.parseSupplement(text)
-                        when (sup.kind) {
-                            SignShapes.Supplement.Kind.WET -> note = "bei Nässe"
-                            SignShapes.Supplement.Kind.TRUCK -> note = "Lkw"
-                            SignShapes.Supplement.Kind.TIME -> {
-                                note = "${sup.fromH}–${sup.toH} h"
-                                active = SignShapes.timeActive(sup, hour)
-                            }
-                            SignShapes.Supplement.Kind.OTHER -> {}
-                        }
-                    }
-                }
+                supplement(full, px, sw, sh, bl, scale, now, hour)?.let { (nt, ac) -> note = nt; active = ac }
                 val ev = SignEvent.Limit(v, note, active)
                 events += ev
                 if (sure && cr!!.p >= 0.97f && cr.speed == v) strong += ev.key
@@ -207,17 +205,40 @@ class SignReader(
         for (i in 0 until sw * rows) white[i] = SignShapes.isWhite(px[i])
         val ringBoxes = rings.map { it }
         val pieces = SignShapes.blobs(white, sw, rows, 8).filter { it.w <= sw / 3 && it.h <= rows / 2 }
-        SignShapes.merge(pieces, 2)
+            .sortedByDescending { it.count }.take(80)    // Zusammenfügen ist teuer: nur die größten Teile
+        val whiteCands = SignShapes.merge(pieces, 2)
             .filter { it.w in 10..(sw / 3) && it.aspect in 0.75f..1.33f && it.fill in 0.3f..0.9f }
             // Innenfläche eines Tempolimit-Schilds ist kein Aufhebungszeichen
             .filter { bl -> ringBoxes.none { r -> bl.minX >= r.minX - 2 && bl.maxX <= r.maxX + 2 && bl.minY >= r.minY - 2 && bl.maxY <= r.maxY + 2 } }
             .sortedByDescending { it.count }
-            .take(4)
-            .forEach { bl ->
+            .take(5)
+            .filter { !onVehicle(norm(it)) }
+        val whiteResults = classifyAll(full, whiteCands.map { norm(it) }, 0.15f)
+        whiteCands.forEachIndexed { wi, bl ->
                 val n = norm(bl)
-                if (onVehicle(n)) return@forEach
                 // zuerst das Netz fragen (kennt Ende 80, Ende aller Verbote, Ende Überholverbot)
-                val cr = classify(full, n, 0.15f)
+                val cr = whiteResults[wi]
+                // Innenfläche eines Tempo-Schilds: der rote Ring ist bei vielen Kameras zu dünn/blass für die Ringsuche
+                val spd = cr?.speed
+                if (cr != null && spd != null && cr.p >= 0.5f) {
+                    // Zusatzzeichen sitzt unter dem ganzen Schild (Ring ca. 14 % breiter als die Innenfläche)
+                    val gx = (bl.w * 0.14f).toInt(); val gy = (bl.h * 0.14f).toInt()
+                    val outer = SignShapes.Blob(max(0, bl.minX - gx), max(0, bl.minY - gy), minOf(sw - 1, bl.maxX + gx), minOf(sh - 1, bl.maxY + gy), bl.count)
+                    val sup = supplement(full, px, sw, sh, outer, scale, now, hour)
+                    val ev = SignEvent.Limit(spd, sup?.first, sup?.second ?: true)
+                    events += ev
+                    if (cr.p >= 0.97f) strong += ev.key else if (cr.p < 0.85f) weak += ev.key
+                    boxes += SignBox(n[0], n[1], n[2], n[3], spd, sup?.first)
+                    dbgCand("weiss", n, bl.w, cr, "$spd " + (if (cr.p >= 0.85f) "sicher" else "schwach") + (sup?.first?.let { " $it" } ?: ""))
+                    return@forEachIndexed
+                }
+                if (cr != null && cr.cls == SignNet.NO_PASSING && cr.p >= 0.85f) {
+                    events += SignEvent.NoPassing
+                    if (cr.p >= 0.97f) strong += SignEvent.NoPassing.key
+                    boxes += SignBox(n[0], n[1], n[2], n[3], null, "Überholverbot")
+                    dbgCand("weiss", n, bl.w, cr, "Ueberholverbot")
+                    return@forEachIndexed
+                }
                 dbgCand("weiss", n, bl.w, cr, "")
                 if (cr != null && cr.p >= 0.8f) {
                     if (cr.p >= 0.97f) when (cr.cls) {
@@ -226,14 +247,14 @@ class SignReader(
                         SignNet.END_NO_PASSING -> strong += SignEvent.EndNoPassing.key
                     }
                     when (cr.cls) {
-                        SignNet.END_ALL -> { events += SignEvent.EndAll; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende"); return@forEach }
-                        SignNet.END_80 -> { events += SignEvent.EndLimit(80); boxes += SignBox(n[0], n[1], n[2], n[3], 80, "Ende"); return@forEach }
-                        SignNet.END_NO_PASSING -> { events += SignEvent.EndNoPassing; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende Überholverbot"); return@forEach }
-                        SignNet.END_NO_PASSING_TRUCK -> return@forEach
-                        else -> if (cr.p >= 0.9f) return@forEach   // sicher etwas anderes
+                        SignNet.END_ALL -> { events += SignEvent.EndAll; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende"); return@forEachIndexed }
+                        SignNet.END_80 -> { events += SignEvent.EndLimit(80); boxes += SignBox(n[0], n[1], n[2], n[3], 80, "Ende"); return@forEachIndexed }
+                        SignNet.END_NO_PASSING -> { events += SignEvent.EndNoPassing; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende Überholverbot"); return@forEachIndexed }
+                        SignNet.END_NO_PASSING_TRUCK -> return@forEachIndexed
+                        else -> if (cr.p >= 0.9f) return@forEachIndexed   // sicher etwas anderes
                     }
                 }
-                val kind = SignShapes.endSign(px, sw, bl) ?: return@forEach
+                val kind = SignShapes.endSign(px, sw, bl) ?: return@forEachIndexed
                 if (kind == SignShapes.EndKind.END_ALL) {
                     events += SignEvent.EndAll
                     boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende")
@@ -258,7 +279,22 @@ class SignReader(
         return boxes
     }
 
+    /** Zusatzzeichen unter einem Schild lesen: (Hinweis, gilt gerade) oder null */
+    private fun supplement(full: Bitmap, px: IntArray, sw: Int, sh: Int, sign: SignShapes.Blob, scale: Float, now: Long, hour: Int): Pair<String?, Boolean>? {
+        val s = SignShapes.supplementBelow(px, sw, sh, sign) ?: return null
+        val sn = floatArrayOf(s[0] * scale / full.width, s[1] * scale / full.height, (s[2] + 1) * scale / full.width, (s[3] + 1) * scale / full.height)
+        val text = cachedText("Z", sn, now) { readText(full, sn, 0f) } ?: return null
+        val sup = SignShapes.parseSupplement(text)
+        return when (sup.kind) {
+            SignShapes.Supplement.Kind.WET -> "bei Nässe" to true
+            SignShapes.Supplement.Kind.TRUCK -> "Lkw" to true
+            SignShapes.Supplement.Kind.TIME -> "${sup.fromH}–${sup.toH} h" to SignShapes.timeActive(sup, hour)
+            SignShapes.Supplement.Kind.OTHER -> null
+        }
+    }
+
     fun close() {
+        runCatching { pool.shutdown() }
         runCatching { recognizer?.close() }
     }
 
