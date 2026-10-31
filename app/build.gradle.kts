@@ -13,8 +13,8 @@ android {
         applicationId = "de.jarvis.w204"
         minSdk = 29          // Android 10 (Head-Unit)
         targetSdk = 34
-        versionCode = 24
-        versionName = "3.3"
+        versionCode = 25
+        versionName = "3.4"
         // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
         val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         ndk { abiFilters += abis }

@@ -48,6 +48,22 @@ class VisionPipeline(
     private var lastRun = 0L
     private var frames = 0
     private var vehicleRuns = 0
+    @Volatile private var lastVehicleRun = 0L
+
+    /** Leistungsregler: Schilder zuerst, Fahrzeuge bekommen den Rest */
+    val gov = PerfGovernor()
+
+    private var camFrames = 0
+    private var camSince = 0L
+    private fun countCameraFrame(now: Long) {
+        if (camSince == 0L) camSince = now
+        camFrames++
+        if (now - camSince >= 2000) {
+            gov.cameraFps = camFrames * 1000f / (now - camSince)
+            camFrames = 0
+            camSince = now
+        }
+    }
 
     private val _preview = MutableStateFlow<ImageBitmap?>(null)
     /** Letztes Kamerabild zur Anzeige (Android-Kamera), bis 30 Bilder/s */
@@ -71,6 +87,7 @@ class VisionPipeline(
     override fun analyze(image: ImageProxy) {
         try {
             val now = SystemClock.elapsedRealtime()
+            countCameraFrame(now)
             val showPreview = now - lastPreview >= previewInterval
             val rec = recorder?.takeIf { it.wantsFrame() }
             val analyse = !procBusy.get() && due()
@@ -123,6 +140,7 @@ class VisionPipeline(
         val rec = recorder?.takeIf { it.wantsFrame() }
         val analyse = !usbBusy.get() && due()
         val now0 = SystemClock.elapsedRealtime()
+        countCameraFrame(now0)
         val signDue = signDue(now0)
         if (!analyse && rec == null && !signDue) return
         if (frame.remaining() < width * height * 4) return
@@ -172,13 +190,15 @@ class VisionPipeline(
         signExecutor.execute {
             try {
                 val run = {
-                    val ssw = minOf(SIGN_WIDTH, bmp.width)
+                    val t0 = SystemClock.elapsedRealtime()
+                    val ssw = minOf(gov.signWidth, bmp.width)
                     val ssh = max(1, bmp.height * ssw / bmp.width)
-                    val sbmp = Bitmap.createScaledBitmap(bmp, ssw, ssh, true)
+                    val sbmp = if (ssw == bmp.width) bmp else Bitmap.createScaledBitmap(bmp, ssw, ssh, true)
                     val spx = IntArray(ssw * ssh)
                     sbmp.getPixels(spx, 0, ssw, 0, 0, ssw, ssh)
                     lastSignBoxes = signs.detect(bmp, spx, ssw, ssh, SystemClock.elapsedRealtime(), lastObjects)
                     lastSignAt = SystemClock.elapsedRealtime()
+                    gov.signDone(lastSignAt - t0, bmp.width, lastSignAt)
                 }
                 if (signRuns++ < 3) CrashGuard.guard("ocr_run") { run() } else run()
             } catch (t: Throwable) {
@@ -221,14 +241,23 @@ class VisionPipeline(
             var objects: List<Detection> = emptyList()
             var laneResult = Lanes()
             if (objectsEnabled) {
-                vehicleDetector()?.let { det ->
-                    val mid = Bitmap.createScaledBitmap(bmp, 640, max(1, bmp.height * 640 / bmp.width), true)
-                    objects = if (vehicleRuns++ < 3) CrashGuard.guard("vehicles_run") { det.detect(mid) } else det.detect(mid)
+                if (now - lastVehicleRun >= gov.vehicleIntervalMs) {
+                    vehicleDetector()?.let { det ->
+                        val t0 = SystemClock.elapsedRealtime()
+                        val mid = Bitmap.createScaledBitmap(bmp, 320, max(1, bmp.height * 320 / bmp.width), true)
+                        objects = if (vehicleRuns++ < 3) CrashGuard.guard("vehicles_run") { det.detect(mid) } else det.detect(mid)
+                        gov.vehicleMs = gov.vehicleMs * 0.8f + (SystemClock.elapsedRealtime() - t0) * 0.2f
+                        lastVehicleRun = now
+                        lastObjects = objects
+                    }
+                } else if (now - lastVehicleRun < 1200) {
+                    objects = lastObjects   // zwischen zwei Fahrzeug-Läufen das letzte Ergebnis weiterverwenden
                 }
+                val t1 = SystemClock.elapsedRealtime()
                 laneResult = lanes.detect(px, sw, sh, calibration, now)
+                gov.laneMs = gov.laneMs * 0.8f + (SystemClock.elapsedRealtime() - t1) * 0.2f
             }
 
-            lastObjects = objects
             val signBoxes = if (signsEnabled && now - lastSignAt < 1000) lastSignBoxes else emptyList()
 
             onFrame(VisionFrame(bmp.width, bmp.height, signBoxes, objects, laneResult))
@@ -255,7 +284,6 @@ class VisionPipeline(
     companion object {
         private const val TAG = "VisionPipeline"
         private const val SCAN_WIDTH = 320
-        private const val SIGN_WIDTH = 640
         private const val SIGN_MIN_MS = 50L
         private const val MIN_INTERVAL_MS = 110L
         private const val PREVIEW_INTERVAL_MS = 30L
