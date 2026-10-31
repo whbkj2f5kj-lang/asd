@@ -1,5 +1,6 @@
 package de.jarvis.w204
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -137,4 +138,56 @@ class ScreenshotTest {
             }
         }
     }
+
+    /** Künstliche Innenstadt: Straßenraster + Gebäudeblöcke um (51.48, 7.21) */
+    private fun city(): Pair<List<de.jarvis.w204.map.Way>, List<de.jarvis.w204.map.Building>> {
+        val lat0 = 51.48; val lon0 = 7.21
+        val dLat = 1 / 110540.0; val dLon = 1 / (111320.0 * Math.cos(Math.toRadians(lat0)))
+        val ways = ArrayList<de.jarvis.w204.map.Way>()
+        var id = 1L
+        for (k in -6..6) {
+            val hw = if (k == 0) "primary" else if (k % 3 == 0) "secondary" else "residential"
+            // Nord-Süd-Straßen
+            ways += de.jarvis.w204.map.Way(id++, mapOf("highway" to hw, "name" to "Nord $k"), doubleArrayOf(lat0 - 800 * dLat, lat0 + 800 * dLat), doubleArrayOf(lon0 + k * 90 * dLon, lon0 + k * 90 * dLon))
+            // Ost-West-Straßen
+            ways += de.jarvis.w204.map.Way(id++, mapOf("highway" to if (k % 4 == 0) "tertiary" else "residential", "name" to "Ost $k"), doubleArrayOf(lat0 + k * 110 * dLat, lat0 + k * 110 * dLat), doubleArrayOf(lon0 - 700 * dLon, lon0 + 700 * dLon))
+        }
+        val houses = ArrayList<de.jarvis.w204.map.Building>()
+        for (i in -6 until 6) for (j in -6 until 6) {
+            val x0 = i * 90 + 14.0; val y0 = j * 110 + 14.0; val w = 60.0; val h = 80.0
+            val xs = doubleArrayOf(x0, x0 + w, x0 + w, x0, x0)
+            val ys = doubleArrayOf(y0, y0, y0 + h, y0 + h, y0)
+            houses += de.jarvis.w204.map.Building(id++, DoubleArray(5) { lat0 + ys[it] * dLat }, DoubleArray(5) { lon0 + xs[it] * dLon }, (8 + ((i * 7 + j * 13) and 15) * 2).toFloat())
+        }
+        return ways to houses
+    }
+
+    @Test fun map3d() {
+        val (ways, houses) = city()
+        paparazzi.snapshot {
+            JarvisTheme {
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().androidx_bg()) {
+                    de.jarvis.w204.ui.Map3DCanvas(ways, houses, de.jarvis.w204.ui.MapPose(51.48 - 300 / 110540.0, 7.21, 0f), "primary", Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+
+    @Test fun values() {
+        val hist = mapOf(
+            "rpm" to List(60) { 1500f + 600f * Math.sin(it / 6.0).toFloat() },
+            "boost" to List(60) { 0.6f + 0.5f * Math.sin(it / 5.0).toFloat() },
+            "coolant" to List(60) { 70f + it * 0.3f },
+            "exhaust" to List(60) { 250f + it * 5f },
+        )
+        paparazzi.snapshot {
+            JarvisTheme {
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().androidx_bg()) {
+                    de.jarvis.w204.ui.ValuesGrid(car.copy(exhaustTemp = 540, oilTemp = 96, maf = 21.4, lambda = 1.8, fuelLevel = 30), hist, Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+
+    private fun Modifier.androidx_bg() = this.then(Modifier.background(J.bg))
 }

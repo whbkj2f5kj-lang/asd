@@ -41,6 +41,8 @@ data class Settings(
     val signSensitivity: Int = 1,
     /** unsichere Schilder klein mit "?" anzeigen */
     val signProvisional: Boolean = true,
+    /** Mitte: 0 Assistent, 1 Karte, 2 Werte */
+    val centerPage: Int = 0,
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -78,6 +80,7 @@ class Prefs(context: Context) {
         laneWarn = sp.getBoolean("ldw", true),
         signSensitivity = sp.getInt("signSens", 1),
         signProvisional = sp.getBoolean("signProv", true),
+        centerPage = sp.getInt("centerPage", 0),
     )
 
     fun save(s: Settings) {
@@ -110,6 +113,7 @@ class Prefs(context: Context) {
             .putBoolean("ldw", s.laneWarn)
             .putInt("signSens", s.signSensitivity)
             .putBoolean("signProv", s.signProvisional)
+            .putInt("centerPage", s.centerPage)
             .putFloat("horizon", s.horizon)
             .apply()
     }

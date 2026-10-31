@@ -156,21 +156,23 @@ fun DashboardApp(vm: MainViewModel) {
                 onTires = { showTires = true },
                 extra = { DashcamButton(vm) },
             ) {
-                ScenePanel(
-                    vm = vm,
-                    scene = scene,
-                    camGranted = camGranted,
-                    cameraBound = !cameraFull,
-                    showCamera = showCamera,
-                    limit = currentLimit,
-                    over = over,
-                    speed = speed,
-                    onToggle = { showCamera = it },
-                    onExpand = { cameraFull = true },
-                    onRequestPermission = { launcher.launch(requiredPermissions()) },
-                    modifier = Modifier.fillMaxSize(),
-                    framed = false,
-                )
+                CenterPager(vm, Modifier.fillMaxSize()) {
+                    ScenePanel(
+                        vm = vm,
+                        scene = scene,
+                        camGranted = camGranted,
+                        cameraBound = !cameraFull,
+                        showCamera = showCamera,
+                        limit = currentLimit,
+                        over = over,
+                        speed = speed,
+                        onToggle = { showCamera = it },
+                        onExpand = { cameraFull = true },
+                        onRequestPermission = { launcher.launch(requiredPermissions()) },
+                        modifier = Modifier.fillMaxSize(),
+                        framed = false,
+                    )
+                }
             }
         } else Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
             TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true },
@@ -179,20 +181,22 @@ fun DashboardApp(vm: MainViewModel) {
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DrivePanel(vehicle, Modifier.weight(1.05f).fillMaxHeight())
                 EnginePanel(vehicle, Modifier.weight(0.85f).fillMaxHeight())
-                ScenePanel(
-                    vm = vm,
-                    scene = scene,
-                    camGranted = camGranted,
-                    cameraBound = !cameraFull,
-                    showCamera = showCamera,
-                    limit = currentLimit,
-                    over = over,
-                    speed = speed,
-                    onToggle = { showCamera = it },
-                    onExpand = { cameraFull = true },
-                    onRequestPermission = { launcher.launch(requiredPermissions()) },
-                    modifier = Modifier.weight(1.3f).fillMaxHeight(),
-                )
+                CenterPager(vm, Modifier.weight(1.3f).fillMaxHeight()) {
+                    ScenePanel(
+                        vm = vm,
+                        scene = scene,
+                        camGranted = camGranted,
+                        cameraBound = !cameraFull,
+                        showCamera = showCamera,
+                        limit = currentLimit,
+                        over = over,
+                        speed = speed,
+                        onToggle = { showCamera = it },
+                        onExpand = { cameraFull = true },
+                        onRequestPermission = { launcher.launch(requiredPermissions()) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
         if (cameraFull) FullscreenCamera(vm, camGranted, currentLimit, over, onClose = { cameraFull = false })
@@ -562,7 +566,8 @@ private fun ScenePanel(
             options = listOf("Spur", "Kamera"),
             selected = if (showCamera) 1 else 0,
             onSelect = { onToggle(it == 1) },
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 14.dp),
+            // oben mittig sitzen die Reiter Assistent/Karte/Werte
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 18.dp),
         )
     }
 }

@@ -141,6 +141,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var cam: CamLimit? = null
     private val limitLock = Any()
 
+    /** Verlauf der Messwerte (1× pro Sekunde, letzte 2 Minuten) für die Werte-Seite */
+    val history = MutableStateFlow<Map<String, List<Float>>>(emptyMap())
+    private val histBuf = HashMap<String, ArrayDeque<Float>>()
+
     /** Vermutetes, noch nicht bestätigtes Tempolimit (klein mit "?" angezeigt) */
     val provisional = MutableStateFlow<Int?>(null)
     @Volatile private var provisionalAt = 0L
@@ -263,6 +267,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         applyRuntime(_settings.value)
         if (_settings.value.tpms) tpms.start()
+
+        // Verlauf für die Werte-Seite
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                if (!obd.status.value.live) continue
+                val v = obd.vehicle.value
+                for (m in de.jarvis.w204.ui.METRICS) {
+                    val x = m.read(v) ?: continue
+                    val q = histBuf.getOrPut(m.key) { ArrayDeque() }
+                    q.addLast(x.toFloat())
+                    while (q.size > 120) q.removeFirst()
+                }
+                history.value = histBuf.mapValues { it.value.toList() }
+            }
+        }
 
         // Debug-Protokoll: Zustand 1× pro Sekunde
         viewModelScope.launch {

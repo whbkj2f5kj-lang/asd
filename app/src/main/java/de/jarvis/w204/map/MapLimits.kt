@@ -55,6 +55,12 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val lat: Double? = null,
         val lon: Double? = null,
         val acc: Int? = null,
+        /** Fahrtrichtung in Grad (0 = Nord), null wenn zu langsam */
+        val bearing: Float? = null,
+        /** Tempo laut GPS in m/s */
+        val speedMs: Float? = null,
+        /** monotone Zeit der Position (ms) */
+        val fixAt: Long = 0L,
     )
 
     private val ctx = context.applicationContext
@@ -259,6 +265,9 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
             lat = loc.latitude,
             lon = loc.longitude,
             acc = acc,
+            bearing = if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1.5f) loc.bearing else _state.value.bearing,
+            speedMs = if (loc.hasSpeed()) loc.speed else null,
+            fixAt = SystemClock.elapsedRealtime(),
             hasFix = true,
             gps = gpsText,
             road = cur?.way?.label ?: cur?.let { roadType(it.way.highway) },
@@ -313,8 +322,10 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
             .take(tiles.size - 25).forEach { tiles.remove(it) }
     }
 
-    private fun download(ty: Int, tx: Int): String? {
-        val body = "data=" + URLEncoder.encode(Osm.query(ty, tx), "UTF-8")
+    private fun download(ty: Int, tx: Int): String? = downloadQuery(Osm.query(ty, tx))
+
+    private fun downloadQuery(query: String): String? {
+        val body = "data=" + URLEncoder.encode(query, "UTF-8")
         var last: String? = null
         repeat(SERVERS.size) {
             val url = SERVERS[server % SERVERS.size]
@@ -346,7 +357,62 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         return null
     }
 
+    // ---------------------------------------------------------------- 3D-Karte
+
+    /** Straßen rund um eine Position (aus den geladenen Kartenstücken) */
+    fun waysAround(lat: Double, lon: Double): List<Way> {
+        val (ty, tx) = Osm.tileOf(lat, lon)
+        val out = HashMap<Long, Way>()
+        for (dy in -1..1) for (dx in -1..1) tiles[Osm.tileKey(ty + dy, tx + dx)]?.forEach { out[it.id] = it }
+        return out.values.toList()
+    }
+
+    /** Gebäude nur laden, solange die Kartenansicht sichtbar ist (spart Daten) */
+    @Volatile var wantBuildings = false
+    private val bTiles = ConcurrentHashMap<Long, List<Building>>()
+    private val bLoading = ConcurrentHashMap.newKeySet<Long>()
+    private val bFailed = ConcurrentHashMap<Long, Long>()
+    private val bDir = File(ctx.filesDir, "osm_b").apply { mkdirs() }
+
+    fun buildingsAround(lat: Double, lon: Double): List<Building> {
+        val (ty, tx) = Buildings.tileOf(lat, lon)
+        val out = ArrayList<Building>()
+        for (dy in -1..1) for (dx in -1..1) {
+            val key = Osm.tileKey(ty + dy, tx + dx)
+            val list = bTiles[key]
+            if (list != null) out += list else if (wantBuildings) ensureBuildings(ty + dy, tx + dx)
+        }
+        return out
+    }
+
+    private fun ensureBuildings(ty: Int, tx: Int) {
+        val key = Osm.tileKey(ty, tx)
+        if (bTiles.containsKey(key) || !bLoading.add(key)) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val f = File(bDir, "${ty}_$tx.json")
+                var text: String? = if (f.exists() && System.currentTimeMillis() - f.lastModified() < MAX_AGE_MS * 3) runCatching { f.readText() }.getOrNull() else null
+                if (text == null && SystemClock.elapsedRealtime() - (bFailed[key] ?: -RETRY_MS) >= RETRY_MS) {
+                    text = net.withLock { downloadQuery(Buildings.query(ty, tx)) }
+                    if (text != null) { val tmp = File(bDir, "${ty}_$tx.tmp"); tmp.writeText(text); tmp.renameTo(f) }
+                    else bFailed[key] = SystemClock.elapsedRealtime()
+                }
+                if (text != null) {
+                    bTiles[key] = Osm.parseOverpass(text).mapNotNull { Buildings.from(it) }
+                    if (bTiles.size > 40) bTiles.keys.take(bTiles.size - 30).forEach { bTiles.remove(it) }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Gebäude $ty/$tx", t)
+                bFailed[key] = SystemClock.elapsedRealtime()
+            } finally {
+                bLoading.remove(key)
+            }
+        }
+    }
+
     fun clearCache() {
+        bTiles.clear()
+        bDir.listFiles()?.forEach { it.delete() }
         tiles.clear()
         dir.listFiles()?.forEach { it.delete() }
         _state.value = _state.value.copy(tiles = 0)
