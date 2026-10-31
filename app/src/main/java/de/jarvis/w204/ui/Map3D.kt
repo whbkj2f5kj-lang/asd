@@ -80,6 +80,7 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
     var pose by remember { mutableStateOf<MapPose?>(null) }
     var ways by remember { mutableStateOf<List<Way>>(emptyList()) }
     var buildings by remember { mutableStateOf<List<Building>>(emptyList()) }
+    val budget = remember { DrawBudget() }
 
     DisposableEffect(active) {
         vm.map.wantBuildings = active
@@ -90,7 +91,12 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
     LaunchedEffect(active) {
         if (!active) return@LaunchedEffect
         var lastLoad = 0L
+        var lastTick = 0L
         while (true) {
+            // im Bildschirmtakt warten, höchstens alle 30 ms neu rechnen (≈ 30+ Bilder/s)
+            val frameT = androidx.compose.runtime.withFrameNanos { it } / 1_000_000L
+            if (frameT - lastTick < 30L) continue
+            lastTick = frameT
             val s = vm.map.state.value
             val lat = s.lat
             val lon = s.lon
@@ -104,7 +110,7 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
                 val tLon = lon + v * dt * sin(r) / (111_320.0 * cos(Math.toRadians(lat)))
                 val p = pose
                 val next = if (p == null || abs(p.lat - tLat) > 0.003 || abs(p.lon - tLon) > 0.004) MapPose(tLat, tLon, hd)
-                else MapPose(p.lat + (tLat - p.lat) * 0.25, p.lon + (tLon - p.lon) * 0.25, lerpAngle(p.heading, hd, 0.15f))
+                else MapPose(p.lat + (tLat - p.lat) * 0.14, p.lon + (tLon - p.lon) * 0.14, lerpAngle(p.heading, hd, 0.08f))
                 if (p == null || abs(next.lat - p.lat) > 1e-7 || abs(next.lon - p.lon) > 1e-7 || abs(next.heading - p.heading) > 0.05f) pose = next
                 if (now - lastLoad > 2000) {
                     ways = vm.map.waysAround(next.lat, next.lon)
@@ -112,14 +118,13 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
                     lastLoad = now
                 }
             }
-            delay(66)   // ~15 Bilder/s reichen für eine ruhige Kartenbewegung
         }
     }
 
     Box(modifier.clip(RoundedCornerShape(24.dp))) {
         val p = pose
         if (p != null) {
-            Map3DCanvas(ways, buildings, p, ms.roadKey, Modifier.fillMaxSize())
+            Map3DCanvas(ways, buildings, p, ms.roadKey, Modifier.fillMaxSize(), maxHouses = budget.houses, onDrawMs = budget::report)
         } else {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MapC.skyTop, MapC.skyBottom))))
         }
@@ -152,6 +157,26 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
         }
         hint?.let {
             Text(it, color = J.dim, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
+        }
+    }
+}
+
+/**
+ * Hält die Karte bei mindestens ~30 Bildern/s: braucht das Zeichnen zu lange, werden weniger
+ * (entfernte) Gebäude gezeichnet; bei Luft wieder mehr.
+ */
+private class DrawBudget {
+    var houses by mutableStateOf(300)
+        private set
+    private var avg = 0f
+    private var n = 0
+    fun report(ms: Float) {
+        avg = if (avg == 0f) ms else avg * 0.9f + ms * 0.1f
+        if (++n % 30 != 0) return
+        houses = when {
+            avg > 22f -> (houses * 0.8f).toInt().coerceAtLeast(60)
+            avg < 12f -> (houses * 1.15f).toInt().coerceAtMost(420)
+            else -> houses
         }
     }
 }
@@ -203,7 +228,10 @@ private fun prepare(ways: List<Way>, buildings: List<Building>, refLat: Double, 
 
 /** Reine Zeichenfunktion (auch für Vorschaubilder ohne Gerät) */
 @Composable
-fun Map3DCanvas(ways: List<Way>, buildings: List<Building>, pose: MapPose, currentRoad: String?, modifier: Modifier = Modifier) {
+fun Map3DCanvas(
+    ways: List<Way>, buildings: List<Building>, pose: MapPose, currentRoad: String?, modifier: Modifier = Modifier,
+    maxHouses: Int = 420, onDrawMs: (Float) -> Unit = {},
+) {
     // Bezugspunkt nur bei neuen Daten oder großer Bewegung neu wählen
     val ref = remember(ways, buildings) { prepare(ways, buildings, pose.lat, pose.lon) }
     Canvas(modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
@@ -213,7 +241,9 @@ fun Map3DCanvas(ways: List<Way>, buildings: List<Building>, pose: MapPose, curre
         val h = Math.toRadians(pose.heading.toDouble())
         val sh = sin(h).toFloat()
         val ch = cos(h).toFloat()
-        drawMap(ref, ox, oy, sh, ch, currentRoad)
+        val t0 = System.nanoTime()
+        drawMap(ref, ox, oy, sh, ch, currentRoad, maxHouses)
+        onDrawMs((System.nanoTime() - t0) / 1e6f)
     }
 }
 
@@ -223,7 +253,7 @@ private const val PITCH = 1.0f      // Blickwinkel nach unten (rad, ~57°)
 private const val F_MIN = -60f      // sichtbarer Bereich hinter dem Auto
 private const val F_MAX = 950f      // … und davor
 
-private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: Float, currentRoad: String?) {
+private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: Float, currentRoad: String?, maxHouses: Int) {
     val w = size.width
     val hgt = size.height
     val sp = sin(PITCH)
@@ -305,7 +335,6 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
         vis += Vis(b, f * f + l * l)
     }
     vis.sortByDescending { it.dist }
-    val maxHouses = 420
     val list = if (vis.size > maxHouses) vis.subList(vis.size - maxHouses, vis.size) else vis
     val walls = Path()
     val roof = Path()
