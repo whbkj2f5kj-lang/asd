@@ -149,7 +149,13 @@ fun ModernCluster(
                 }
             }
 
-            Row(Modifier.weight(1f).fillMaxWidth()) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            // Mitte (Karte/Kamera) liegt über die volle Breite HINTER den Instrumenten und läuft weich in sie hinein
+            val inset = maxWidth * (1f / 3.25f) + 6.dp
+            androidx.compose.runtime.CompositionLocalProvider(LocalCenterInset provides inset) {
+                Box(Modifier.fillMaxSize()) { center() }
+            }
+            Row(Modifier.fillMaxSize()) {
                 // ---- links: Geschwindigkeit
                 Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                     BigValue(
@@ -173,7 +179,6 @@ fun ModernCluster(
 
                 // ---- Mitte: Verkehrsassistent / Karte / Werte
                 Box(Modifier.weight(1.25f).fillMaxHeight().padding(horizontal = 6.dp)) {
-                    center()
                     // Begrüßung während der Startanimation
                     androidx.compose.animation.AnimatedVisibility(
                         visible = sweeping, enter = fadeIn(), exit = fadeOut(),
@@ -214,6 +219,7 @@ fun ModernCluster(
                         modifier = Modifier.weight(0.42f).padding(end = 18.dp, top = h * 0.18f),
                     )
                 }
+            }
             }
 
             StatusBar(v, message, clock, tireText, tireLevel, onTires, driveMode, palette.glow)

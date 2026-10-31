@@ -18,6 +18,7 @@ import de.jarvis.w204.ui.J
 import de.jarvis.w204.ui.JarvisTheme
 import de.jarvis.w204.ui.LaneView
 import de.jarvis.w204.ui.ModernCluster
+import de.jarvis.w204.ui.softEdges
 import de.jarvis.w204.ui.SpeedLimitSign
 import de.jarvis.w204.ui.LocalGaugePalette
 import de.jarvis.w204.ui.Palettes
@@ -98,8 +99,38 @@ class ScreenshotTest {
                 onMic = {},
                 onSettings = {},
             ) {
-                LaneView(scene, car.speed, J.accent, Modifier.fillMaxSize(), transparent = true, animate = false)
-                SpeedLimitSign(100, false, Modifier.align(Alignment.TopStart).padding(14.dp).size(62.dp))
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(horizontal = de.jarvis.w204.ui.LocalCenterInset.current)) {
+                    LaneView(scene, car.speed, J.accent, Modifier.fillMaxSize(), transparent = true, animate = false)
+                    SpeedLimitSign(100, false, Modifier.align(Alignment.TopStart).padding(14.dp).size(62.dp))
+                }
+            }
+        }
+    }
+
+    /** Cockpit mit Karte: reicht bis hinter die Instrumente, weiche Ränder */
+    @Test
+    fun modernMap() {
+        val (ways, houses) = city()
+        paparazzi.snapshot {
+            JarvisTheme {
+                ModernCluster(
+                    v = car,
+                    status = ObdStatus(ConnState.CONNECTED, "Verbunden", rate = 14.0),
+                    message = null,
+                    clock = "17:58",
+                    listening = false,
+                    onMic = {},
+                    onSettings = {},
+                ) {
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+                        val f = de.jarvis.w204.ui.LocalCenterInset.current / maxWidth
+                        de.jarvis.w204.ui.Map3DCanvas(
+                            ways, houses, de.jarvis.w204.ui.MapPose(51.48 - 300 / 110540.0, 7.21, 0f), "Nord 0",
+                            Modifier.fillMaxSize().then(run { Modifier.softEdges((f - 0.24f).coerceAtLeast(0f), (f - 0.02f).coerceAtLeast(0.12f), top = 0.02f, bottom = 0.10f) }),
+                            viewFraction = 1f - 2f * f,
+                        )
+                    }
+                }
             }
         }
     }

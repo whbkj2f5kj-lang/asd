@@ -9,6 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -112,3 +114,40 @@ fun animatePalette(target: GaugePalette): GaugePalette {
     val g by androidx.compose.animation.animateColorAsState(target.glow, spec, label = "pg")
     return GaugePalette(target.name, l, m, d, g)
 }
+
+/** Seitlicher Abstand der Mitte zu den Instrumenten (Karte/Kamera liegen dahinter über die volle Breite) */
+val LocalCenterInset = androidx.compose.runtime.compositionLocalOf { 0.dp }
+
+/**
+ * Weiche Ränder ohne Kante: blendet den Inhalt zu allen Seiten hin aus (Alpha-Maske).
+ * Werte sind Anteile der Breite/Höhe: [x0..x1] wird links eingeblendet, [1-x1..1-x0] rechts ausgeblendet.
+ * [area] begrenzt die Maske z. B. auf das eigentliche Kamerabild; alles außerhalb wird unsichtbar.
+ */
+fun Modifier.softEdges(
+    x0: Float, x1: Float,
+    top: Float, bottom: Float,
+    area: (androidx.compose.ui.geometry.Size) -> androidx.compose.ui.geometry.Rect = { androidx.compose.ui.geometry.Rect(androidx.compose.ui.geometry.Offset.Zero, it) },
+): Modifier = this
+    .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val r = area(size)
+        if (r.width <= 1f || r.height <= 1f) return@drawWithContent
+        val clear = Color.Transparent
+        val full = Color.Black
+        drawRect(
+            Brush.horizontalGradient(
+                0f to clear, x0 to clear, x1.coerceAtLeast(x0 + 0.001f) to full,
+                (1f - x1).coerceAtLeast(x1 + 0.001f) to full, (1f - x0).coerceAtLeast(x1 + 0.002f) to clear, 1f to clear,
+                startX = r.left, endX = r.right,
+            ),
+            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+        )
+        drawRect(
+            Brush.verticalGradient(
+                0f to clear, top to full, (1f - bottom) to full, 1f to clear,
+                startY = r.top, endY = r.bottom,
+            ),
+            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+        )
+    }

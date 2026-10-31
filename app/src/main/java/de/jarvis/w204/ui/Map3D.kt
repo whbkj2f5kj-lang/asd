@@ -74,7 +74,7 @@ data class MapPose(val lat: Double, val lon: Double, val heading: Float)
  * Fahrtrichtung oben. Keine Navigation – nur Orientierung (CarPlay macht den Rest).
  */
 @Composable
-fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier) {
+fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier, viewFraction: Float = 1f) {
     val ms by vm.map.state.collectAsStateWithLifecycle()
     val limit by vm.speedLimit.collectAsStateWithLifecycle()
     var pose by remember { mutableStateOf<MapPose?>(null) }
@@ -121,11 +121,13 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
         }
     }
 
-    Box(modifier.clip(RoundedCornerShape(24.dp))) {
+    Box(modifier) {
         val p = pose
         if (p != null) {
-            Map3DCanvas(ways, buildings, p, ms.roadKey, Modifier.fillMaxSize(), maxHouses = budget.houses, onDrawMs = budget::report)
+            Map3DCanvas(ways, buildings, p, ms.roadKey, Modifier.fillMaxSize(), maxHouses = budget.houses, onDrawMs = budget::report, viewFraction = viewFraction)
         }
+        // Bedienelemente nur im mittleren Bereich, die Karte selbst reicht bis hinter die Instrumente
+        Box(Modifier.fillMaxSize().padding(horizontal = LocalCenterInset.current)) {
 
         // Straßenname + Limit
         Column(Modifier.align(Alignment.TopStart).padding(14.dp)) {
@@ -161,6 +163,7 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier)
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp)
                     .clip(RoundedCornerShape(14.dp)).background(Color(0xCC0B1424)).padding(horizontal = 16.dp, vertical = 10.dp),
             )
+        }
         }
     }
 }
@@ -235,6 +238,8 @@ private fun prepare(ways: List<Way>, buildings: List<Building>, refLat: Double, 
 fun Map3DCanvas(
     ways: List<Way>, buildings: List<Building>, pose: MapPose, currentRoad: String?, modifier: Modifier = Modifier,
     maxHouses: Int = 420, onDrawMs: (Float) -> Unit = {},
+    /** Anteil der Breite, der wie bisher die "Mitte" ist (Rest = hinter den Instrumenten, gleicher Maßstab) */
+    viewFraction: Float = 1f,
 ) {
     // Bezugspunkt nur bei neuen Daten oder großer Bewegung neu wählen
     val ref = remember(ways, buildings) { prepare(ways, buildings, pose.lat, pose.lon) }
@@ -246,7 +251,7 @@ fun Map3DCanvas(
         val sh = sin(h).toFloat()
         val ch = cos(h).toFloat()
         val t0 = System.nanoTime()
-        drawMap(ref, ox, oy, sh, ch, currentRoad, maxHouses)
+        drawMap(ref, ox, oy, sh, ch, currentRoad, maxHouses, viewFraction.coerceIn(0.2f, 1f))
         onDrawMs((System.nanoTime() - t0) / 1e6f)
     }
 }
@@ -257,12 +262,12 @@ private const val PITCH = 1.0f      // Blickwinkel nach unten (rad, ~57°)
 private const val F_MIN = -60f      // sichtbarer Bereich hinter dem Auto
 private const val F_MAX = 950f      // … und davor
 
-private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: Float, currentRoad: String?, maxHouses: Int) {
+private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: Float, currentRoad: String?, maxHouses: Int, viewFraction: Float) {
     val w = size.width
     val hgt = size.height
     val sp = sin(PITCH)
     val cp = cos(PITCH)
-    val focal = max(w, hgt) * 1.0f
+    val focal = max(w * viewFraction, hgt) * 1.0f
     val cx = w / 2f
     val cy = hgt * 0.76f
 
@@ -390,6 +395,5 @@ private fun DrawScope.drawMap(p: Prepared, ox: Float, oy: Float, sh: Float, ch: 
     // Ränder weich ausblenden (Karte schwebt im Cockpit)
     drawRect(Brush.verticalGradient(listOf(Color.Black, Color.Transparent), startY = 0f, endY = hgt * 0.25f), blendMode = BlendMode.DstOut)
     drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = hgt * 0.9f, endY = hgt), blendMode = BlendMode.DstOut)
-    drawRect(Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = 0f, endX = w * 0.14f), blendMode = BlendMode.DstOut)
-    drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = w * 0.86f, endX = w), blendMode = BlendMode.DstOut)
+    // seitlich blendet die Mitte (softEdges) aus – so läuft die Karte bis hinter die Instrumente
 }

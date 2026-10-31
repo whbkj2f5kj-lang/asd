@@ -515,12 +515,14 @@ private fun ScenePanel(
         else -> J.accent
     }
 
-    Box(if (framed) modifier.panel() else modifier.clip(RoundedCornerShape(24.dp))) {
-        // Kamera läuft immer (für die Erkennung), die Spuransicht liegt darüber
+    Box(if (framed) modifier.panel() else modifier) {
+        // Kamera läuft immer (für die Erkennung), sichtbar aber nur in der Kamera-Ansicht.
+        // Ohne Rahmen reicht das Bild bis hinter die Instrumente und läuft an allen Rändern weich aus.
         if (camGranted && cameraBound && settings.cameraEnabled) {
-            // Kamera läuft immer (Erkennung), sichtbar aber nur in der Kamera-Ansicht
-            CameraWithOverlay(vm, Modifier.fillMaxSize().alpha(if (showCamera) 1f else 0f), showHorizon = false, onClick = { if (showCamera) onExpand() })
+            CameraWithOverlay(vm, Modifier.fillMaxSize().alpha(if (showCamera) 1f else 0f), showHorizon = false,
+                onClick = { if (showCamera) onExpand() }, soft = !framed)
         }
+        Box(Modifier.fillMaxSize().padding(horizontal = if (framed) 0.dp else LocalCenterInset.current)) {
         if (!showCamera) {
             val departure by vm.laneDeparture.collectAsStateWithLifecycle()
             LaneView(scene, speed, gapColor, Modifier.fillMaxSize(), transparent = !framed, departure = departure)
@@ -586,6 +588,7 @@ private fun ScenePanel(
             // oben mittig sitzen die Reiter Assistent/Karte/Werte
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 18.dp),
         )
+        }
     }
 }
 
@@ -609,7 +612,7 @@ private fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> U
 }
 
 @Composable
-private fun CameraWithOverlay(vm: MainViewModel, modifier: Modifier, showHorizon: Boolean, onClick: () -> Unit) {
+private fun CameraWithOverlay(vm: MainViewModel, modifier: Modifier, showHorizon: Boolean, onClick: () -> Unit, soft: Boolean = false) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val frame by vm.visionFrame.collectAsStateWithLifecycle()
     val error by vm.cameraError.collectAsStateWithLifecycle()
@@ -620,7 +623,17 @@ private fun CameraWithOverlay(vm: MainViewModel, modifier: Modifier, showHorizon
         else -> usbCams.isNotEmpty()
     }
 
-    Box(modifier.background(Color.Black)) {
+    val frameW = frame?.width ?: 16
+    val frameH = frame?.height ?: 9
+    Box(
+        if (!soft) modifier.background(Color.Black)
+        // weiche Ränder am eigentlichen Kamerabild (es wird eingepasst, nicht beschnitten)
+        else modifier.softEdges(0f, 0.16f, top = 0.12f, bottom = 0.14f) { sz ->
+            val sc = min(sz.width / frameW, sz.height / frameH)
+            val iw = frameW * sc; val ih = frameH * sc
+            androidx.compose.ui.geometry.Rect((sz.width - iw) / 2f, (sz.height - ih) / 2f, (sz.width + iw) / 2f, (sz.height + ih) / 2f)
+        }
+    ) {
         if (useUsb) {
             UsbCameraFeed(
                 vision = vm.vision,
