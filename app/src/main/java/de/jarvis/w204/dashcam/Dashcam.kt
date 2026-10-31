@@ -223,15 +223,15 @@ class Dashcam(context: Context, scope: CoroutineScope) {
 
     private fun drawOverlay(c: android.graphics.Canvas) {
         val h = dst.height()
-        val w = dst.width()
+        val bw = dst.width()
         runCatching {
             for (b in overlayBoxes()) {
                 boxPaint2.color = if (b.value != null || b.label != null) Color.GREEN else Color.YELLOW
-                c.drawRect(b.l * w, b.t * h, b.r * w, b.b * h, boxPaint2)
+                c.drawRect(b.l * bw, b.t * h, b.r * bw, b.b * h, boxPaint2)
                 val txt = listOfNotNull(b.value?.toString(), b.label).joinToString(" ")
                 if (txt.isNotEmpty()) {
                     textPaint.textSize = (h * 0.03f).coerceAtLeast(12f)
-                    c.drawText(txt, b.l * w, (b.t * h - 4f).coerceAtLeast(textPaint.textSize), textPaint)
+                    c.drawText(txt, b.l * bw, (b.t * h - 4f).coerceAtLeast(textPaint.textSize), textPaint)
                 }
             }
         }
