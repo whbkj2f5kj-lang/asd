@@ -34,7 +34,9 @@ class VisionPipeline(
     private val _detectorError = MutableStateFlow<String?>(null)
     val detectorError: StateFlow<String?> = _detectorError
 
-    private val signs = SignReader(onSign)
+    private val signs = SignReader(onSign) {
+        appContext.assets.open("signnet.bin").use { SignNet.load(it) }
+    }
     private val lanes = LaneDetector()
     private var vehicles: VehicleDetector? = null
     private var vehiclesTried = false
@@ -174,7 +176,7 @@ class VisionPipeline(
                     val mid = Bitmap.createScaledBitmap(bmp, 640, max(1, bmp.height * 640 / bmp.width), true)
                     objects = if (vehicleRuns++ < 3) CrashGuard.guard("vehicles_run") { det.detect(mid) } else det.detect(mid)
                 }
-                laneResult = lanes.detect(px, sw, sh, calibration.horizon, now)
+                laneResult = lanes.detect(px, sw, sh, calibration, now)
             }
 
             val signBoxes = if (signsEnabled) signs.detect(bmp, px, sw, sh, now, objects) else emptyList()

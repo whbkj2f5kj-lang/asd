@@ -501,11 +501,14 @@ private fun ScenePanel(
             CameraWithOverlay(vm, Modifier.fillMaxSize(), showHorizon = false, onClick = { if (showCamera) onExpand() })
         }
         if (!showCamera) {
-            LaneView(scene, speed, gapColor, Modifier.fillMaxSize(), transparent = !framed)
+            val departure by vm.laneDeparture.collectAsStateWithLifecycle()
+            LaneView(scene, speed, gapColor, Modifier.fillMaxSize(), transparent = !framed, departure = departure)
         }
 
         Column(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             SpeedLimitSign(limit, over, Modifier.size(62.dp).clickable { vm.clearLimit() })
+            val noPass by vm.noPassing.collectAsStateWithLifecycle()
+            if (noPass) NoPassingSign(Modifier.padding(top = 6.dp).size(40.dp).clickable { vm.noPassing.value = false })
             val note by vm.limitNote.collectAsStateWithLifecycle()
             note?.let {
                 Text(
@@ -531,6 +534,7 @@ private fun ScenePanel(
             !settings.objectRecognition && !showCamera -> "Fahrzeugerkennung aus"
             detectorError != null -> detectorError
             !scene.laneDetected && !showCamera -> "Spur nicht erkannt"
+            scene.laneYellow && !showCamera -> "Baustelle – gelbe Markierung"
             else -> null
         }
         hint?.let {

@@ -22,7 +22,23 @@ data class LaneLine(val m: Float, val c: Float) {
     fun x(y: Float) = m * y + c
 }
 
-data class Lanes(val left: LaneLine? = null, val right: LaneLine? = null)
+/**
+ * Spur auf der Straße in Metern: Linie x(z) = a + heading·z + curve·z² (x seitlich, rechts +; z nach vorn).
+ * [left]/[right] = a der linken/rechten Linie auf Höhe des Autos.
+ */
+data class LaneModel(
+    val left: Float,
+    val right: Float,
+    val heading: Float,
+    val curve: Float,
+    val leftSeen: Boolean,
+    val rightSeen: Boolean,
+    val yellow: Boolean = false,
+) {
+    val width get() = right - left
+}
+
+data class Lanes(val left: LaneLine? = null, val right: LaneLine? = null, val model: LaneModel? = null)
 
 data class VisionFrame(
     val width: Int,
@@ -41,6 +57,13 @@ data class Scene(
     val laneRight: Float = 1.75f,
     val laneDetected: Boolean = false,
     val leadDistance: Float? = null,
+    /** Spur biegt ab: x-Versatz = laneHeading·z + laneCurve·z² */
+    val laneHeading: Float = 0f,
+    val laneCurve: Float = 0f,
+    /** beide Linien gerade wirklich gesehen (nicht ergänzt) */
+    val laneBoth: Boolean = false,
+    /** Baustellenmarkierung (gelb) aktiv */
+    val laneYellow: Boolean = false,
 )
 
 /** Rechnet Bildpunkte auf die Straßenebene um (Lochkamera, ebene Straße). */
@@ -74,31 +97,51 @@ class SceneBuilder {
     private var laneL = -1.75f
     private var laneR = 1.75f
     private var laneSeen = 0L
+    private var heading = 0f
+    private var curve = 0f
+    private var both = false
+    private var yellow = false
     private var lead: Float? = null
 
     fun update(frame: VisionFrame, cal: Calibration, now: Long): Scene {
         val p = Projector(cal, frame.width, frame.height)
 
         // --- Fahrspur ---
-        val l = frame.lanes.left
-        val r = frame.lanes.right
-        val xl = l?.let { (p.laneX(it, 8f) + p.laneX(it, 14f)) / 2f }?.takeIf { it in -3.5f..-0.3f }
-        val xr = r?.let { (p.laneX(it, 8f) + p.laneX(it, 14f)) / 2f }?.takeIf { it in 0.3f..3.5f }
-        when {
-            xl != null && xr != null && (xr - xl) in 2.4f..4.8f -> {
-                laneL = ema(laneL, xl, 0.3f); laneR = ema(laneR, xr, 0.3f); laneSeen = now
-            }
-            xl != null -> {
-                laneL = ema(laneL, xl, 0.3f); laneR = ema(laneR, xl + 3.5f, 0.3f); laneSeen = now
-            }
-            xr != null -> {
-                laneR = ema(laneR, xr, 0.3f); laneL = ema(laneL, xr - 3.5f, 0.3f); laneSeen = now
+        val model = frame.lanes.model
+        if (model != null) {
+            // Spurmodell in Metern direkt übernehmen (schon geprüft und geglättet)
+            laneL = ema(laneL, model.left, 0.5f)
+            laneR = ema(laneR, model.right, 0.5f)
+            heading = ema(heading, model.heading, 0.4f)
+            curve = ema(curve, model.curve, 0.3f)
+            both = model.leftSeen && model.rightSeen
+            yellow = model.yellow
+            laneSeen = now
+        } else {
+            val l = frame.lanes.left
+            val r = frame.lanes.right
+            val xl = l?.let { (p.laneX(it, 8f) + p.laneX(it, 14f)) / 2f }?.takeIf { it in -3.5f..-0.3f }
+            val xr = r?.let { (p.laneX(it, 8f) + p.laneX(it, 14f)) / 2f }?.takeIf { it in 0.3f..3.5f }
+            both = false
+            when {
+                xl != null && xr != null && (xr - xl) in 2.4f..4.8f -> {
+                    laneL = ema(laneL, xl, 0.3f); laneR = ema(laneR, xr, 0.3f); laneSeen = now; both = true
+                }
+                xl != null -> {
+                    laneL = ema(laneL, xl, 0.3f); laneR = ema(laneR, xl + 3.5f, 0.3f); laneSeen = now
+                }
+                xr != null -> {
+                    laneR = ema(laneR, xr, 0.3f); laneL = ema(laneL, xr - 3.5f, 0.3f); laneSeen = now
+                }
             }
         }
         val laneDetected = now - laneSeen < 1500
         if (!laneDetected) {
             laneL = ema(laneL, -1.75f, 0.05f)
             laneR = ema(laneR, 1.75f, 0.05f)
+            heading = ema(heading, 0f, 0.1f)
+            curve = ema(curve, 0f, 0.1f)
+            both = false
         }
 
         // --- Objekte in Straßenkoordinaten ---
@@ -146,7 +189,11 @@ class SceneBuilder {
 
         val visible = tracks.filter { it.hits >= 2 }
         val leadTrack = visible
-            .filter { it.kind != ObjKind.PERSON && it.x in (laneL + 0.2f)..(laneR - 0.2f) }
+            .filter {
+                // Spur folgt der Kurve: Grenzen auf Höhe des Objekts verschieben
+                val shift = heading * it.z + curve * it.z * it.z
+                it.kind != ObjKind.PERSON && it.x in (laneL + shift + 0.2f)..(laneR + shift - 0.2f)
+            }
             .minByOrNull { it.z }
         val old = lead
         lead = leadTrack?.let { if (old == null) it.z else ema(old, it.z, 0.4f) }
@@ -157,6 +204,10 @@ class SceneBuilder {
             laneRight = laneR,
             laneDetected = laneDetected,
             leadDistance = lead,
+            laneHeading = heading,
+            laneCurve = curve,
+            laneBoth = both && laneDetected,
+            laneYellow = yellow && laneDetected,
         )
     }
 

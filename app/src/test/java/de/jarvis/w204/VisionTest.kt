@@ -99,7 +99,7 @@ class VisionTest {
                 px[y * sw + (xr + dx).coerceIn(0, sw - 1)] = 0xFFFFFFFF.toInt()
             }
         }
-        val lanes = LaneDetector().detect(px, sw, sh, 0.5f, 0)
+        val lanes = LaneDetector().detect(px, sw, sh, cal, 0)
         assertNotNull("linke Linie", lanes.left)
         assertNotNull("rechte Linie", lanes.right)
         assertTrue(lanes.left!!.m < 0f)

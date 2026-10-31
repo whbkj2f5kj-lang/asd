@@ -167,3 +167,29 @@ fun SpeedLimitSign(limit: Int?, over: Boolean, modifier: Modifier = Modifier) {
         )
     }
 }
+
+
+/** Zeichen 276: Überholverbot (rotes Auto links, schwarzes rechts) */
+@Composable
+fun NoPassingSign(modifier: Modifier = Modifier) {
+    Canvas(modifier.aspectRatio(1f)) {
+        val r = size.minDimension / 2f
+        val c = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+        drawCircle(Color.White, r, c)
+        drawCircle(Color(0xFFD7161E), r * 0.89f, c, style = Stroke(r * 0.22f))
+        fun car(cx: Float, color: Color) {
+            val w = r * 0.42f
+            val h = r * 0.62f
+            drawRoundRect(
+                color,
+                topLeft = androidx.compose.ui.geometry.Offset(cx - w / 2f, c.y - h / 2f),
+                size = androidx.compose.ui.geometry.Size(w, h),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.25f),
+            )
+            // Scheiben
+            drawRect(Color.White, topLeft = androidx.compose.ui.geometry.Offset(cx - w * 0.32f, c.y - h * 0.32f), size = androidx.compose.ui.geometry.Size(w * 0.64f, h * 0.14f))
+        }
+        car(c.x - r * 0.26f, Color(0xFFD7161E))
+        car(c.x + r * 0.26f, Color(0xFF111111))
+    }
+}

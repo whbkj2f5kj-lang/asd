@@ -63,6 +63,8 @@ fun LaneView(
     modifier: Modifier = Modifier,
     transparent: Boolean = false,
     animate: Boolean = true,
+    /** -1/+1: Spurverlassenswarnung links/rechts -> Linie rot */
+    departure: Int = 0,
 ) {
     val speed by rememberUpdatedState((speedKmh ?: 0) / 3.6f)
     var phase by remember { mutableFloatStateOf(0f) }
@@ -79,6 +81,8 @@ fun LaneView(
     val laneL by animateFloatAsState(scene.laneLeft, tween(300), label = "laneL")
     val laneR by animateFloatAsState(scene.laneRight, tween(300), label = "laneR")
     val laneAlpha by animateFloatAsState(if (scene.laneDetected) 0.95f else 0.35f, tween(400), label = "laneA")
+    val heading by animateFloatAsState(scene.laneHeading.coerceIn(-0.15f, 0.15f), tween(300), label = "laneH")
+    val curve by animateFloatAsState(scene.laneCurve.coerceIn(-0.01f, 0.01f), tween(300), label = "laneC")
     val measurer = rememberTextMeasurer()
     val glow = LocalGaugePalette.current.glow
 
@@ -102,12 +106,14 @@ fun LaneView(
             )
         }
 
+        // Spur folgt der erkannten Kurve
+        val bend = { z: Float -> val zz = max(z, 0f); heading * zz + curve * zz * zz }
+        val steps = (0..16).map { zNear + (FAR_Z - zNear) * it / 16f }
+
         // Eigene Spur leicht blau hinterlegt
         val lanePath = Path().apply {
-            moveTo(cam.x(laneL, zNear), cam.y(zNear))
-            lineTo(cam.x(laneR, zNear), cam.y(zNear))
-            lineTo(cam.x(laneR, FAR_Z), cam.y(FAR_Z))
-            lineTo(cam.x(laneL, FAR_Z), cam.y(FAR_Z))
+            steps.forEachIndexed { i, z -> if (i == 0) moveTo(cam.x(laneL + bend(z), z), cam.y(z)) else lineTo(cam.x(laneL + bend(z), z), cam.y(z)) }
+            steps.asReversed().forEach { z -> lineTo(cam.x(laneR + bend(z), z), cam.y(z)) }
             close()
         }
         drawPath(
@@ -122,16 +128,16 @@ fun LaneView(
         // Nachbarspuren (angedeutet)
         val laneW = laneR - laneL
         listOf(laneL - laneW, laneR + laneW).forEach { x ->
-            drawLine(
-                Color.White.copy(alpha = 0.10f),
-                Offset(cam.x(x, zNear), cam.y(zNear)),
-                Offset(cam.x(x, FAR_Z), cam.y(FAR_Z)),
-                strokeWidth = 2f,
-            )
+            val p = Path().apply {
+                steps.forEachIndexed { i, z -> if (i == 0) moveTo(cam.x(x + bend(z), z), cam.y(z)) else lineTo(cam.x(x + bend(z), z), cam.y(z)) }
+            }
+            drawPath(p, Color.White.copy(alpha = 0.10f), style = Stroke(2f))
         }
 
-        // Eigene Spurlinien, gestrichelt und mitlaufend
-        listOf(laneL, laneR).forEach { x -> drawDashes(cam, x, phase, laneAlpha, zNear) }
+        // Eigene Spurlinien, gestrichelt und mitlaufend (rot bei Spurverlassenswarnung)
+        val warnColor = Color(0xFFFF3B30)
+        drawDashes(cam, laneL, phase, laneAlpha, zNear, bend, if (departure < 0) warnColor else Color.White)
+        drawDashes(cam, laneR, phase, laneAlpha, zNear, bend, if (departure > 0) warnColor else Color.White)
 
         // Andere Verkehrsteilnehmer, von hinten nach vorn gezeichnet
         val labelStyle = TextStyle(color = gapColor, fontSize = (size.width * 0.045f).toSp(), fontWeight = FontWeight.Medium)
@@ -177,22 +183,27 @@ fun LaneView(
     }
 }
 
-private fun DrawScope.drawDashes(cam: ChaseCam, x: Float, phase: Float, alpha: Float, zNear: Float) {
-    val half = 0.07f
+private fun DrawScope.drawDashes(
+    cam: ChaseCam, x0: Float, phase: Float, alpha: Float, zNear: Float,
+    bend: (Float) -> Float = { 0f }, color: Color = Color.White,
+) {
+    val half = if (color == Color.White) 0.07f else 0.11f
     var z = zNear - phase
     while (z < FAR_Z) {
         val z0 = max(z, zNear)
         val z1 = z + DASH_LEN
         if (z1 > zNear) {
+            val xa = x0 + bend(z0)
+            val xb = x0 + bend(z1)
             val p = Path().apply {
-                moveTo(cam.x(x - half, z0), cam.y(z0))
-                lineTo(cam.x(x + half, z0), cam.y(z0))
-                lineTo(cam.x(x + half, z1), cam.y(z1))
-                lineTo(cam.x(x - half, z1), cam.y(z1))
+                moveTo(cam.x(xa - half, z0), cam.y(z0))
+                lineTo(cam.x(xa + half, z0), cam.y(z0))
+                lineTo(cam.x(xb + half, z1), cam.y(z1))
+                lineTo(cam.x(xb - half, z1), cam.y(z1))
                 close()
             }
             val fade = (1f - (z0 / FAR_Z)).coerceIn(0.15f, 1f)
-            drawPath(p, Color.White.copy(alpha = alpha * fade))
+            drawPath(p, color.copy(alpha = alpha * fade))
         }
         z += DASH_PERIOD
     }

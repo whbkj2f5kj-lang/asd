@@ -102,6 +102,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var cam: CamLimit? = null
     private val limitLock = Any()
 
+    /** Überholverbot aktiv (Kamera) */
+    val noPassing = MutableStateFlow(false)
+    @Volatile private var noPassingAt = 0L
+    @Volatile private var noPassingRoad: String? = null
+
+    /** Überholverbot endet auch ohne Ende-Schild: nach dem Abbiegen oder spätestens nach 15 Minuten */
+    private fun checkNoPassing() {
+        if (!noPassing.value) return
+        val now = SystemClock.elapsedRealtime()
+        val key = map.state.value.takeIf { it.hasFix }?.roadKey
+        if (noPassingRoad == null) noPassingRoad = key
+        if (now - noPassingAt > 15 * 60_000L || (key != null && noPassingRoad != null && key != noPassingRoad && now - noPassingAt > 5_000)) {
+            noPassing.value = false
+        }
+    }
+
     private val _visionFrame = MutableStateFlow<VisionFrame?>(null)
     val visionFrame: StateFlow<VisionFrame?> = _visionFrame
 
@@ -119,13 +135,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val usbAll = MutableStateFlow<List<String>>(emptyList())
 
     private val sceneBuilder = SceneBuilder()
+    private val ldw = de.jarvis.w204.vision.LaneDeparture()
+    /** -1/+1: gerade Spurverlassenswarnung links/rechts */
+    val laneDeparture = MutableStateFlow(0)
+    @Volatile private var laneDepartureAt = 0L
+    private val tone by lazy { runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 85) }.getOrNull() }
+    private fun beep() { runCatching { tone?.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 260) } }
 
     /** Läuft im Analyse-Thread der Kamera. */
     val vision = VisionPipeline(
         context = app,
         onFrame = { f ->
             _visionFrame.value = f
-            _scene.value = sceneBuilder.update(f, _settings.value.calibration, SystemClock.elapsedRealtime())
+            val now = SystemClock.elapsedRealtime()
+            val sc = sceneBuilder.update(f, _settings.value.calibration, now)
+            _scene.value = sc
+            if (_settings.value.laneWarn) {
+                val d = ldw.update(sc, obd.vehicle.value.speed, now)
+                if (d != 0) { laneDeparture.value = d; laneDepartureAt = now; beep() }
+            }
+            if (laneDeparture.value != 0 && now - laneDepartureAt > 1500) laneDeparture.value = 0
         },
         onSign = { onSignEvent(it) },
     )
@@ -223,7 +252,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             obd.status.map { it.state }.distinctUntilChanged().collect { st ->
                 if (st == ConnState.CONNECTED || st == ConnState.DEMO) brain.onSessionStart()
-                if (st == ConnState.IGNITION_OFF) { synchronized(limitLock) { cam = null; inTown = null }; recompute(); dashcam.flush() }
+                if (st == ConnState.IGNITION_OFF) { synchronized(limitLock) { cam = null; inTown = null }; recompute(); dashcam.flush(); noPassing.value = false }
             }
         }
 
@@ -235,7 +264,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // Kartenlimit bei jeder neuen GPS-Position einrechnen
-        viewModelScope.launch { map.state.collect { recompute() } }
+        viewModelScope.launch { map.state.collect { recompute(); checkNoPassing() } }
     }
 
 
@@ -315,7 +344,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     else -> setLimit(e.value, null, "Tempolimit ${e.value}.")
                 }
             }
+            is de.jarvis.w204.vision.SignEvent.NoPassing -> {
+                noPassingAt = SystemClock.elapsedRealtime()
+                noPassingRoad = map.state.value.takeIf { it.hasFix }?.roadKey
+                if (noPassing.value) return
+                noPassing.value = true
+                if (_settings.value.announceSigns) jarvis.say("Überholverbot.", "np", 20_000)
+            }
+            is de.jarvis.w204.vision.SignEvent.EndNoPassing -> {
+                if (!noPassing.value) return
+                noPassing.value = false
+                if (_settings.value.announceSigns) jarvis.say("Ende Überholverbot.", "enp", 20_000)
+            }
             is de.jarvis.w204.vision.SignEvent.EndLimit, de.jarvis.w204.vision.SignEvent.EndAll -> {
+                if (e is de.jarvis.w204.vision.SignEvent.EndAll) noPassing.value = false
                 // Nach der Aufhebung gilt wieder die allgemeine Regel
                 when (inTown) {
                     true -> setLimit(50, "innerorts", "Ende der Begrenzung. Innerorts 50.")
@@ -442,6 +484,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         tpms.release()
+        runCatching { tone?.release() }
         map.stop()
         dashcam.flush()
         obd.stop()

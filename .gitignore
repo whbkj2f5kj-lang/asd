@@ -3,3 +3,7 @@ build/
 local.properties
 .idea/
 *.iml
+
+# vom Build erzeugt (ml/train_signs.py)
+app/src/main/assets/signnet.bin
+app/src/test/resources/signnet_samples.bin

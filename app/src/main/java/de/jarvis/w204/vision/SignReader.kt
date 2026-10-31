@@ -25,6 +25,8 @@ sealed interface SignEvent {
     data object EndAll : SignEvent { override val key get() = "EA" }
     data class TownEntry(val name: String?) : SignEvent { override val key get() = "T" }
     data class TownExit(val name: String?) : SignEvent { override val key get() = "X" }
+    data object NoPassing : SignEvent { override val key get() = "NP" }
+    data object EndNoPassing : SignEvent { override val key get() = "ENP" }
 }
 
 /**
@@ -34,8 +36,36 @@ sealed interface SignEvent {
  *  • Ortsschild Anfang/Ende (gelb; Ende mit rotem Schrägstrich)
  * Runde Tempo-Aufkleber hinten auf Lkw werden ignoriert (liegen innerhalb einer Fahrzeug-Box).
  */
-class SignReader(private val onEvent: (SignEvent) -> Unit) {
+class SignReader(
+    private val onEvent: (SignEvent) -> Unit,
+    private val netLoader: () -> SignNet? = { null },
+) {
     private var recognizer: TextRecognizer? = null
+    private var net: SignNet? = null
+    private var netTried = false
+
+    private fun net(): SignNet? {
+        if (!netTried) { netTried = true; net = runCatching { netLoader() }.getOrNull() }
+        return net
+    }
+
+    /** Schildausschnitt (mit [pad] Rand je Seite) vom Netz bestimmen lassen. */
+    private fun classify(full: Bitmap, n: FloatArray, pad: Float): SignNet.Result? {
+        val nn = net() ?: return null
+        val w = (n[2] - n[0]) * full.width
+        val h = (n[3] - n[1]) * full.height
+        val x0 = (n[0] * full.width - w * pad).toInt().coerceIn(0, full.width - 2)
+        val y0 = (n[1] * full.height - h * pad).toInt().coerceIn(0, full.height - 2)
+        val x1 = (n[2] * full.width + w * pad).toInt().coerceIn(x0 + 1, full.width)
+        val y1 = (n[3] * full.height + h * pad).toInt().coerceIn(y0 + 1, full.height)
+        return runCatching {
+            val crop = Bitmap.createBitmap(full, x0, y0, x1 - x0, y1 - y0)
+            val small = Bitmap.createScaledBitmap(crop, SignNet.S, SignNet.S, true)
+            val px = IntArray(SignNet.S * SignNet.S)
+            small.getPixels(px, 0, SignNet.S, 0, 0, SignNet.S, SignNet.S)
+            nn.classify(px)
+        }.getOrNull()
+    }
     private var initFailed = false
     private var runs = 0
 
@@ -98,7 +128,25 @@ class SignReader(private val onEvent: (SignEvent) -> Unit) {
         for (bl in rings) {
             val n = norm(bl)
             if (onVehicle(n)) { boxes += SignBox(n[0], n[1], n[2], n[3], null, "Fahrzeug"); continue }
-            val v = cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
+            val cr = classify(full, n, 0.12f)
+            val sure = cr != null && cr.p >= 0.85f
+            if (sure && cr!!.cls == SignNet.NO_PASSING) {
+                events += SignEvent.NoPassing
+                boxes += SignBox(n[0], n[1], n[2], n[3], null, "Überholverbot")
+                continue
+            }
+            // Netz ist sicher: kein Tempolimit (anderes rundes Schild, Rücklicht, …)
+            if (sure && cr!!.speed == null) continue
+            val v: Int? = if (sure) {
+                val netV = cr!!.speed!!
+                // 130, 110, 90, 40, 10 kennt das Netz nicht – bei ähnlichen Ziffern die Texterkennung fragen
+                if (netV in setOf(30, 100, 120)) {
+                    val ocr = cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
+                    if (ocr != null && ocr in NOT_IN_NET) ocr else netV
+                } else netV
+            } else {
+                cached("L", n, now) { readNumber(full, n, inset = 0.14f) }
+            }
             var note: String? = null
             var active = true
             if (v != null) {
@@ -135,9 +183,20 @@ class SignReader(private val onEvent: (SignEvent) -> Unit) {
             .sortedByDescending { it.count }
             .take(4)
             .forEach { bl ->
-                val kind = SignShapes.endSign(px, sw, bl) ?: return@forEach
                 val n = norm(bl)
                 if (onVehicle(n)) return@forEach
+                // zuerst das Netz fragen (kennt Ende 80, Ende aller Verbote, Ende Überholverbot)
+                val cr = classify(full, n, 0.15f)
+                if (cr != null && cr.p >= 0.8f) {
+                    when (cr.cls) {
+                        SignNet.END_ALL -> { events += SignEvent.EndAll; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende"); return@forEach }
+                        SignNet.END_80 -> { events += SignEvent.EndLimit(80); boxes += SignBox(n[0], n[1], n[2], n[3], 80, "Ende"); return@forEach }
+                        SignNet.END_NO_PASSING -> { events += SignEvent.EndNoPassing; boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende Überholverbot"); return@forEach }
+                        SignNet.END_NO_PASSING_TRUCK -> return@forEach
+                        else -> if (cr.p >= 0.9f) return@forEach   // sicher etwas anderes
+                    }
+                }
+                val kind = SignShapes.endSign(px, sw, bl) ?: return@forEach
                 if (kind == SignShapes.EndKind.END_ALL) {
                     events += SignEvent.EndAll
                     boxes += SignBox(n[0], n[1], n[2], n[3], null, "Ende")
@@ -235,6 +294,8 @@ class SignReader(private val onEvent: (SignEvent) -> Unit) {
 
     companion object {
         private val VALID_LIMITS = setOf(5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130)
+        /** Tempolimits, die im Trainingsdatensatz fehlen */
+        private val NOT_IN_NET = setOf(5, 10, 40, 90, 110, 130)
 
         /** OCR-Text in ein gültiges Tempolimit wandeln (verwechselte Buchstaben korrigieren). */
         fun digitsToLimit(text: String): Int? {

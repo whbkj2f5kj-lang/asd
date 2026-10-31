@@ -35,6 +35,8 @@ data class Settings(
     val dashcamOverlay: Boolean = true,
     val dashcamAutoSave: Boolean = true,
     val dashcamVolume: String = "external_primary",
+    /** Spurverlassenswarnung (Ton) */
+    val laneWarn: Boolean = true,
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -69,6 +71,7 @@ class Prefs(context: Context) {
         dashcamOverlay = sp.getBoolean("dcOver", true),
         dashcamAutoSave = sp.getBoolean("dcAuto", true),
         dashcamVolume = sp.getString("dcVol", "external_primary") ?: "external_primary",
+        laneWarn = sp.getBoolean("ldw", true),
     )
 
     fun save(s: Settings) {
@@ -98,6 +101,7 @@ class Prefs(context: Context) {
             .putBoolean("dcOver", s.dashcamOverlay)
             .putBoolean("dcAuto", s.dashcamAutoSave)
             .putString("dcVol", s.dashcamVolume)
+            .putBoolean("ldw", s.laneWarn)
             .putFloat("horizon", s.horizon)
             .apply()
     }

@@ -22,18 +22,44 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # Schild-Klassifikator: nur neu trainieren, wenn sich das Trainingsskript geändert hat
+      - uses: actions/cache@v4
+        id: signnet
+        with:
+          path: |
+            app/src/main/assets/signnet.bin
+            app/src/test/resources/signnet_samples.bin
+          key: signnet-${{ hashFiles('ml/train_signs.py') }}
+
+      - uses: actions/setup-python@v5
+        if: steps.signnet.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Schild-Netz trainieren (GTSRB)
+        if: steps.signnet.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          pip install -q tensorflow-cpu==2.16.1 pillow numpy
+          python ml/train_signs.py 2>&1 | tee train.log
+
       - name: APK bauen
         shell: bash
         run: |
           set -o pipefail
-          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' --tests 'de.jarvis.w204.DiagTest' --tests 'de.jarvis.w204.DtcTest' --tests 'de.jarvis.w204.TpmsTest' --tests 'de.jarvis.w204.SignTest' --tests 'de.jarvis.w204.OsmTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
+          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' --tests 'de.jarvis.w204.DiagTest' --tests 'de.jarvis.w204.DtcTest' --tests 'de.jarvis.w204.TpmsTest' --tests 'de.jarvis.w204.SignTest' --tests 'de.jarvis.w204.OsmTest' --tests 'de.jarvis.w204.SignNetTest' --tests 'de.jarvis.w204.LaneTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
 
       - name: Fehler zusammenfassen
         if: failure()
         shell: bash
         run: |
-          grep -E "^e: |error:|What went wrong|Could not|^> [^T]|Caused by|FAILED|Error|expected|tests completed" build.log | head -80 > errors.txt || true
-          [ -s errors.txt ] || tail -60 build.log > errors.txt
+          if [ -f build.log ]; then
+            grep -E "^e: |error:|What went wrong|Could not|^> [^T]|Caused by|FAILED|Error|expected|tests completed" build.log | head -80 > errors.txt || true
+            [ -s errors.txt ] || tail -60 build.log > errors.txt
+          else
+            tail -40 train.log > errors.txt 2>/dev/null || echo "Fehler vor dem Build" > errors.txt
+          fi
           msg=$(sed -e 's/%/%25/g' errors.txt | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Build-Fehler::$msg"
 
