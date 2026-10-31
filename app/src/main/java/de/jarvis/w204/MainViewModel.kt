@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.jarvis.w204.car.ConnState
+import de.jarvis.w204.ui.Alert.Level as AlertLevel
 import de.jarvis.w204.obd.ObdManager
 import de.jarvis.w204.vision.Scene
 import de.jarvis.w204.vision.SceneBuilder
@@ -141,6 +142,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var cam: CamLimit? = null
     private val limitLock = Any()
 
+    // ---------- OEM-Bedienung: Warnkarten, Startanimation, Fahrprogramm
+
+    /** aktuell angezeigte Warnkarte */
+    val alert = MutableStateFlow<de.jarvis.w204.ui.Alert?>(null)
+
+    /** Zeitpunkt für die Startanimation (Instrumente schwingen einmal aus) */
+    val startupAt = MutableStateFlow(SystemClock.elapsedRealtime())
+
+    enum class DriveMode(val label: String) { COMFORT("COMFORT"), SPORT("SPORT"), ECO("ECO") }
+    val driveMode = MutableStateFlow(DriveMode.COMFORT)
+    private var sportScore = 0f
+    private var ecoScore = 0f
+
+    fun dismissAlert() { alert.value = null }
+
+    private fun showAlert(level: de.jarvis.w204.ui.Alert.Level, title: String, text: String) {
+        alert.value = de.jarvis.w204.ui.Alert(level, title, text, SystemClock.elapsedRealtime())
+        if (_settings.value.voice) de.jarvis.w204.ui.Chime.play(level)
+    }
+
+    /** Welche Ansagen zusätzlich als Karte erscheinen (Schlüssel -> Stufe + Titel) */
+    private fun alertFor(text: String, key: String?) {
+        key ?: return
+        val (level, title) = when {
+            key == "hot" -> AlertLevel.WARN to "Kühlmitteltemperatur hoch"
+            key == "cold" -> AlertLevel.INFO to "Motor noch kalt"
+            key == "iat" -> AlertLevel.INFO to "Ladelufttemperatur"
+            key == "charge" -> AlertLevel.WARN to "Ladespannung"
+            key == "regen" -> AlertLevel.INFO to "Partikelfilter regeneriert"
+            key == "regen_end" -> AlertLevel.INFO to "Regeneration abgeschlossen"
+            key.startsWith("leak_") -> AlertLevel.CRIT to "Druckverlust Reifen"
+            key.startsWith("low2_") -> AlertLevel.CRIT to "Reifendruck sehr niedrig"
+            key.startsWith("low_") -> AlertLevel.WARN to "Reifendruck niedrig"
+            key.startsWith("hot_") -> AlertLevel.WARN to "Reifentemperatur"
+            key.startsWith("batt_") -> AlertLevel.INFO to "Reifensensor"
+            key == "pause" -> AlertLevel.INFO to "Pause empfohlen"
+            key.startsWith("dc_") -> AlertLevel.INFO to "Dashcam"
+            else -> return
+        }
+        showAlert(level, title, text)
+    }
+
     /** Verlauf der Messwerte (1× pro Sekunde, letzte 2 Minuten) für die Werte-Seite */
     val history = MutableStateFlow<Map<String, List<Float>>>(emptyMap())
     private val histBuf = HashMap<String, ArrayDeque<Float>>()
@@ -268,6 +311,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         applyRuntime(_settings.value)
         if (_settings.value.tpms) tpms.start()
 
+        jarvis.onSaid = { text, key -> alertFor(text, key) }
+
+        // Warnkarte nach einer Weile ausblenden (kritische bleiben länger)
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(500)
+                val a = alert.value ?: continue
+                val keep = when (a.level) { de.jarvis.w204.ui.Alert.Level.INFO -> 6_000L; de.jarvis.w204.ui.Alert.Level.WARN -> 10_000L; else -> 20_000L }
+                if (SystemClock.elapsedRealtime() - a.at > keep) alert.value = null
+            }
+        }
+
+        // Fahrprogramm aus dem Fahrstil (gleitend über ~10 s)
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                val v = obd.vehicle.value
+                if (!obd.status.value.live || !v.engineRunning) continue
+                val sporty = (v.load ?: 0) > 70 || (v.rpm ?: 0) > 3200
+                val eco = (v.load ?: 100) < 35 && (v.rpm ?: 9999) < 1900 && (v.speed ?: 0) > 30
+                sportScore += ((if (sporty) 1f else 0f) - sportScore) * 0.12f
+                ecoScore += ((if (eco) 1f else 0f) - ecoScore) * 0.06f
+                val cur = driveMode.value
+                driveMode.value = when {
+                    sportScore > 0.45f || (cur == DriveMode.SPORT && sportScore > 0.2f) -> DriveMode.SPORT
+                    ecoScore > 0.8f || (cur == DriveMode.ECO && ecoScore > 0.55f) -> DriveMode.ECO
+                    else -> DriveMode.COMFORT
+                }
+            }
+        }
+
         // Verlauf für die Werte-Seite
         viewModelScope.launch {
             while (true) {
@@ -351,7 +425,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Neue Fahrt (Zündung an / Verbindung steht) -> Begrüßung
         viewModelScope.launch {
             obd.status.map { it.state }.distinctUntilChanged().collect { st ->
-                if (st == ConnState.CONNECTED || st == ConnState.DEMO) brain.onSessionStart()
+                if (st == ConnState.CONNECTED || st == ConnState.DEMO) {
+                    brain.onSessionStart()
+                    // Startanimation bei Zündung an (nicht bei jeder kurzen Verbindungsunterbrechung)
+                    if (SystemClock.elapsedRealtime() - startupAt.value > 60_000) startupAt.value = SystemClock.elapsedRealtime()
+                }
                 if (st == ConnState.IGNITION_OFF) { synchronized(limitLock) { cam = null; inTown = null }; recompute(); dashcam.flush(); noPassing.value = false }
             }
         }

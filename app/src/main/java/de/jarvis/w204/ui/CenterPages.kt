@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,16 +65,24 @@ fun CenterPager(vm: MainViewModel, modifier: Modifier = Modifier, assistant: @Co
     }
     Box(modifier) {
         HorizontalPager(state = pager, beyondViewportPageCount = 2, modifier = Modifier.fillMaxSize()) { page ->
-            when (page) {
-                0 -> Box(Modifier.fillMaxSize(), content = assistant)
-                1 -> MapView3D(vm, active = pager.currentPage == 1, modifier = Modifier.fillMaxSize())
-                else -> ValuesPage(vm, Modifier.fillMaxSize())
+            // Tiefeneffekt beim Wischen: die gehende Seite tritt zurück und blendet aus
+            Box(Modifier.fillMaxSize().graphicsLayer {
+                val off = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                alpha = 1f - off * 0.65f
+                val sc = 1f - off * 0.1f
+                scaleX = sc; scaleY = sc
+            }) {
+                when (page) {
+                    0 -> Box(Modifier.fillMaxSize(), content = assistant)
+                    1 -> MapView3D(vm, active = pager.currentPage == 1, modifier = Modifier.fillMaxSize())
+                    else -> ValuesPage(vm, Modifier.fillMaxSize())
+                }
             }
         }
         // Reiter oben mittig (antippen oder wischen)
         Row(
             Modifier.align(Alignment.TopCenter).padding(top = 8.dp).clip(RoundedCornerShape(50))
-                .background(Color(0xB30B111A)).border(1.dp, J.hairline, RoundedCornerShape(50)).padding(3.dp),
+                .background(Color(0xB30B111A)).glass(RoundedCornerShape(50)).padding(3.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             listOf("Assistent", "Karte", "Werte").forEachIndexed { i, label ->
@@ -180,7 +189,10 @@ fun ValuesGrid(v: VehicleState, hist: Map<String, List<Float>>, modifier: Modifi
         modifier = modifier,
     ) {
         items(shown, key = { it.key }) { m ->
-            val value = m.read(v)
+            val raw = m.read(v)
+            // Zahlen gleiten weich zum neuen Wert
+            val anim by androidx.compose.animation.core.animateFloatAsState((raw ?: 0.0).toFloat(), androidx.compose.animation.core.tween(450), label = m.key)
+            val value = raw?.let { anim.toDouble() }
             val warn = value != null && ((m.warnAbove != null && value > m.warnAbove) || (m.warnBelow != null && value < m.warnBelow && (m.key != "volt" || (v.rpm ?: 0) < 400) && (m.key != "coolant" || v.engineRunning)))
             Tile(
                 m.label,
@@ -198,8 +210,8 @@ fun ValuesGrid(v: VehicleState, hist: Map<String, List<Float>>, modifier: Modifi
 internal fun Tile(label: String, value: String?, unit: String?, history: List<Float>, color: Color, content: (@Composable () -> Unit)? = null) {
     Box(
         Modifier.fillMaxWidth().height(104.dp).clip(RoundedCornerShape(16.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xFF111821), Color(0xFF0A0F15))))
-            .border(1.dp, J.hairline, RoundedCornerShape(16.dp)),
+            .background(Brush.verticalGradient(listOf(Color(0xFF0F151D), Color(0xFF080C11))))
+            .glass(RoundedCornerShape(16.dp)),
     ) {
         if (history.size >= 2) Sparkline(history, color, Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(40.dp))
         Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {

@@ -193,6 +193,8 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(12.dp))
+                    SwitchRow("Farbwelt folgt dem Fahrstil (Komfort/Sport/Eco)", settings.driveModeLook) { on -> vm.update { it.copy(driveModeLook = on) } }
+                    Spacer(Modifier.height(12.dp))
                     Section("Ansagen")
                     SwitchRow("Sprachansagen", settings.voice) { on -> vm.update { it.copy(voice = on) } }
                     SwitchRow("Erkannte Tempolimits ansagen", settings.announceSigns) { on -> vm.update { it.copy(announceSigns = on) } }

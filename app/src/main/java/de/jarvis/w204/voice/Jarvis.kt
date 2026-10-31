@@ -39,6 +39,9 @@ class Jarvis(context: Context) : TextToSpeech.OnInitListener {
         tts.setSpeechRate(1.02f)
     }
 
+    /** Jede tatsächlich ausgegebene Meldung (Text, Schlüssel) – für die Warnkarten im Cockpit */
+    @Volatile var onSaid: ((String, String?) -> Unit)? = null
+
     /** key + cooldownMs verhindern, dass dieselbe Warnung ständig wiederholt wird. */
     @Synchronized
     fun say(text: String, key: String? = null, cooldownMs: Long = 0L) {
@@ -49,6 +52,7 @@ class Jarvis(context: Context) : TextToSpeech.OnInitListener {
             cooldowns[key] = now
         }
         _message.value = text
+        runCatching { onSaid?.invoke(text, key) }
         if (!speakEnabled || !ready) return
         // Warnungen sind nur jetzt relevant: wenn schon zwei Ansagen warten, ältere verwerfen
         val mode = if (pending >= 2) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD

@@ -43,6 +43,8 @@ data class Settings(
     val signProvisional: Boolean = true,
     /** Mitte: 0 Assistent, 1 Karte, 2 Werte */
     val centerPage: Int = 0,
+    /** Farbwelt folgt dem Fahrstil (Komfort / Sport / Eco) */
+    val driveModeLook: Boolean = true,
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -81,6 +83,7 @@ class Prefs(context: Context) {
         signSensitivity = sp.getInt("signSens", 1),
         signProvisional = sp.getBoolean("signProv", true),
         centerPage = sp.getInt("centerPage", 0),
+        driveModeLook = sp.getBoolean("driveLook", true),
     )
 
     fun save(s: Settings) {
@@ -114,6 +117,7 @@ class Prefs(context: Context) {
             .putInt("signSens", s.signSensitivity)
             .putBoolean("signProv", s.signProvisional)
             .putInt("centerPage", s.centerPage)
+            .putBoolean("driveLook", s.driveModeLook)
             .putFloat("horizon", s.horizon)
             .apply()
     }

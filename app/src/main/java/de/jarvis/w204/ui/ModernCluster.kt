@@ -45,6 +45,10 @@ import de.jarvis.w204.car.VehicleState
 import de.jarvis.w204.car.W204Profile
 import de.jarvis.w204.car.fmt1
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -82,12 +86,49 @@ fun ModernCluster(
     tireLevel: Int = -1,
     onTires: () -> Unit = {},
     extra: @Composable () -> Unit = {},
+    /** ändert sich bei Zündung an -> Instrumente schwingen einmal aus */
+    sweepKey: Long = 0L,
+    /** COMFORT / SPORT / ECO (unten mittig, wie im OEM-Cockpit) */
+    driveMode: String? = null,
     center: @Composable BoxScope.() -> Unit,
 ) {
+    val palette = LocalGaugePalette.current
+    val noise = rememberNoiseBrush()
+
+    // ---- Startanimation: Licht blendet auf, Zeiger schwingen bis Anschlag und zurück
+    val sweep = remember { androidx.compose.animation.core.Animatable(0f) }
+    val intro = remember { androidx.compose.animation.core.Animatable(if (sweepKey > 0L) 0f else 1f) }
+    var sweeping by remember { mutableStateOf(false) }
+    LaunchedEffect(sweepKey) {
+        if (sweepKey <= 0L) return@LaunchedEffect
+        sweeping = true
+        intro.snapTo(0.15f)
+        launch { intro.animateTo(1f, androidx.compose.animation.core.tween(900)) }
+        sweep.snapTo(0f)
+        sweep.animateTo(1f, androidx.compose.animation.core.tween(850, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        delay(150)
+        sweep.animateTo(0f, androidx.compose.animation.core.tween(1000, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        delay(900)
+        sweeping = false
+    }
+    val speedShown = if (sweeping) sweep.value * 220f else v.speed?.toFloat()
+    val rpmShown = if (sweeping) sweep.value * W204Profile.RPM_GAUGE_MAX else v.rpm?.toFloat()
+    // Zahlen zählen weich statt zu springen
+    val speedAnim by androidx.compose.animation.core.animateFloatAsState(v.speed?.toFloat() ?: 0f, androidx.compose.animation.core.tween(350), label = "spd")
+    val boostAnim by androidx.compose.animation.core.animateFloatAsState(v.boostBar?.toFloat() ?: 0f, androidx.compose.animation.core.tween(350), label = "bst")
+
     BoxWithConstraints(
-        Modifier.fillMaxSize().background(
-            Brush.verticalGradient(listOf(J.bg, J.bg, Color(0xFF07101A)))
-        )
+        Modifier.fillMaxSize()
+            .background(Brush.verticalGradient(listOf(J.bg, J.bg, Color(0xFF07101A))))
+            .drawBehind {
+                // Tiefe: weiches Licht hinter den Instrumenten in der Farbwelt + feine Struktur
+                val r = size.height * 0.75f
+                drawCircle(Brush.radialGradient(listOf(palette.glow.copy(alpha = 0.07f), Color.Transparent), center = androidx.compose.ui.geometry.Offset(size.width * 0.2f, size.height * 0.55f), radius = r), r, androidx.compose.ui.geometry.Offset(size.width * 0.2f, size.height * 0.55f))
+                drawCircle(Brush.radialGradient(listOf(palette.glow.copy(alpha = 0.07f), Color.Transparent), center = androidx.compose.ui.geometry.Offset(size.width * 0.8f, size.height * 0.55f), radius = r), r, androidx.compose.ui.geometry.Offset(size.width * 0.8f, size.height * 0.55f))
+                drawRect(Brush.radialGradient(listOf(Color(0x1A2A6CFF), Color.Transparent), center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height * 1.1f), radius = size.width * 0.5f))
+                drawRect(noise)
+            }
+            .graphicsLayer { alpha = intro.value }
     ) {
         val h = maxHeight
         val big = (h.value * 0.15f).sp
@@ -112,7 +153,7 @@ fun ModernCluster(
                 // ---- links: Geschwindigkeit
                 Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                     BigValue(
-                        value = v.speed?.toString() ?: "–",
+                        value = if (sweeping) (speedShown ?: 0f).toInt().toString() else if (v.speed != null) speedAnim.roundToInt().toString() else "–",
                         unit = "km/h",
                         sub = null,
                         size = big,
@@ -120,7 +161,7 @@ fun ModernCluster(
                         modifier = Modifier.weight(0.42f).padding(start = 16.dp, top = h * 0.18f),
                     )
                     ChevronGauge(
-                        value = v.speed?.toFloat(),
+                        value = speedShown,
                         min = 0f, apexValue = 120f, max = 220f,
                         ticks = (0..22).map { it * 10f },
                         label = { if (it.toInt() in setOf(0, 30, 60, 90, 120, 150, 180, 220)) it.toInt().toString() else null },
@@ -130,13 +171,32 @@ fun ModernCluster(
                     )
                 }
 
-                // ---- Mitte: Verkehrsassistent
-                Box(Modifier.weight(1.25f).fillMaxHeight().padding(horizontal = 6.dp), content = center)
+                // ---- Mitte: Verkehrsassistent / Karte / Werte
+                Box(Modifier.weight(1.25f).fillMaxHeight().padding(horizontal = 6.dp)) {
+                    center()
+                    // Begrüßung während der Startanimation
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = sweeping, enter = fadeIn(), exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.Center),
+                    ) {
+                        Column(
+                            Modifier.clip(RoundedCornerShape(20.dp)).background(Color(0xE6000000)).padding(horizontal = 28.dp, vertical = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            val hour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+                            Text(
+                                when (hour) { in 5..10 -> "Guten Morgen"; in 11..17 -> "Guten Tag"; else -> "Guten Abend" },
+                                color = J.text, fontSize = 30.sp, fontWeight = FontWeight.Light,
+                            )
+                            Text(W204Profile.TITLE, color = palette.glow, fontSize = 13.sp, letterSpacing = 3.sp)
+                        }
+                    }
+                }
 
                 // ---- rechts: Drehzahl + Ladedruck
                 Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                     ChevronGauge(
-                        value = v.rpm?.toFloat(),
+                        value = rpmShown,
                         min = 0f, apexValue = 2500f, max = W204Profile.RPM_GAUGE_MAX,
                         ticks = (0..10).map { it * 500f },
                         label = { if (it.toInt() % 1000 == 0) (it.toInt() / 1000).toString() else null },
@@ -146,7 +206,7 @@ fun ModernCluster(
                         modifier = Modifier.weight(0.58f).fillMaxHeight(),
                     )
                     BigValue(
-                        value = v.boostBar?.let { fmt1(it) } ?: "–",
+                        value = v.boostBar?.let { fmt1(boostAnim.toDouble()) } ?: "–",
                         unit = "bar",
                         sub = v.load?.let { "$it % Last" },
                         size = big,
@@ -156,7 +216,7 @@ fun ModernCluster(
                 }
             }
 
-            StatusBar(v, message, clock, tireText, tireLevel, onTires)
+            StatusBar(v, message, clock, tireText, tireLevel, onTires, driveMode, palette.glow)
         }
     }
 }
@@ -183,7 +243,7 @@ private fun BigValue(
 }
 
 @Composable
-private fun StatusBar(v: VehicleState, message: String?, clock: String, tireText: String?, tireLevel: Int, onTires: () -> Unit) {
+private fun StatusBar(v: VehicleState, message: String?, clock: String, tireText: String?, tireLevel: Int, onTires: () -> Unit, driveMode: String? = null, modeColor: Color = J.accent) {
     var showMessage by remember { mutableStateOf(false) }
     LaunchedEffect(message) {
         if (message != null) {
@@ -201,9 +261,15 @@ private fun StatusBar(v: VehicleState, message: String?, clock: String, tireText
         Text(clock, color = J.text, fontSize = 26.sp, fontWeight = FontWeight.Light)
 
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            // Fahrprogramm (wie "COMFORT" im BMW-Cockpit), weicht einer Meldung
+            androidx.compose.animation.AnimatedVisibility(visible = driveMode != null && !(showMessage && message != null), enter = fadeIn(), exit = fadeOut()) {
+                androidx.compose.animation.Crossfade(driveMode, label = "mode") { m ->
+                    Text(m ?: "", color = modeColor, fontSize = 17.sp, letterSpacing = 4.sp, fontWeight = FontWeight.Light)
+                }
+            }
             androidx.compose.animation.AnimatedVisibility(visible = showMessage && message != null, enter = fadeIn(), exit = fadeOut()) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(50)).background(J.panel2).padding(horizontal = 14.dp, vertical = 6.dp),
+                    Modifier.glass(RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(J.accent))

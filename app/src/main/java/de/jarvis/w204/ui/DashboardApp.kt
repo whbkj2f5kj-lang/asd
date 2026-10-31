@@ -134,8 +134,18 @@ fun DashboardApp(vm: MainViewModel) {
     val over = warnLimit != null && speed != null && speed > warnLimit!! + settings.tolerance
 
     val clock = rememberClock()
+    val driveMode by vm.driveMode.collectAsStateWithLifecycle()
+    val startupAt by vm.startupAt.collectAsStateWithLifecycle()
+    val basePalette = Palettes.all[settings.palette.coerceIn(0, Palettes.all.lastIndex)]
+    val palette = animatePalette(
+        if (!settings.driveModeLook) basePalette else when (driveMode) {
+            MainViewModel.DriveMode.SPORT -> Palettes.red
+            MainViewModel.DriveMode.ECO -> Palettes.eco
+            else -> basePalette
+        }
+    )
     androidx.compose.runtime.CompositionLocalProvider(
-        LocalGaugePalette provides Palettes.all[settings.palette.coerceIn(0, Palettes.all.lastIndex)]
+        LocalGaugePalette provides palette
     ) {
     Box(Modifier.fillMaxSize().background(J.bg)) {
         if (settings.layout == 0) {
@@ -155,6 +165,8 @@ fun DashboardApp(vm: MainViewModel) {
                 tireLevel = tireSummary(vm, tires, settings).second,
                 onTires = { showTires = true },
                 extra = { DashcamButton(vm) },
+                sweepKey = startupAt,
+                driveMode = if (settings.driveModeLook && status.live) driveMode.label else null,
             ) {
                 CenterPager(vm, Modifier.fillMaxSize()) {
                     ScenePanel(
@@ -200,6 +212,9 @@ fun DashboardApp(vm: MainViewModel) {
             }
         }
         if (cameraFull) FullscreenCamera(vm, camGranted, currentLimit, over, onClose = { cameraFull = false })
+        // Warnkarte im OEM-Stil
+        val alert by vm.alert.collectAsStateWithLifecycle()
+        AlertCard(alert, onDismiss = { vm.dismissAlert() }, modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp))
         if (showSettings) SettingsScreen(vm, onClose = { showSettings = false })
         if (showDiagnose) DiagnoseScreen(vm, onClose = { showDiagnose = false })
         if (showTires) TireScreen(vm, onClose = { showTires = false })

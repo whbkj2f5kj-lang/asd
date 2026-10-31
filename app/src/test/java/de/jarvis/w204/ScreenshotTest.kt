@@ -73,6 +73,7 @@ class ScreenshotTest {
                 listening = false,
                 onMic = {},
                 onSettings = {},
+                driveMode = "COMFORT",
             ) {
                 LaneView(scene, car.speed, J.accent, Modifier.fillMaxSize(), transparent = true, animate = false)
                 SpeedLimitSign(100, false, Modifier.align(Alignment.TopStart).padding(14.dp).size(62.dp))
@@ -185,6 +186,28 @@ class ScreenshotTest {
             JarvisTheme {
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().androidx_bg()) {
                     de.jarvis.w204.ui.ValuesGrid(car.copy(exhaustTemp = 540, oilTemp = 96, maf = 21.4, lambda = 1.8, fuelLevel = 30), hist, Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+
+    @Test fun alertCard() {
+        paparazzi.snapshot {
+            CompositionLocalProvider(LocalGaugePalette provides Palettes.red) {
+                JarvisTheme {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                        ModernCluster(
+                            v = car.copy(rpm = 3900, load = 85), status = ObdStatus(ConnState.CONNECTED, "Verbunden", rate = 14.0),
+                            message = null, clock = "18:05", listening = false, onMic = {}, onSettings = {}, driveMode = "SPORT",
+                        ) {
+                            LaneView(scene, car.speed, J.accent, Modifier.fillMaxSize(), transparent = true, animate = false)
+                        }
+                        de.jarvis.w204.ui.AlertCard(
+                            de.jarvis.w204.ui.Alert(de.jarvis.w204.ui.Alert.Level.WARN, "Reifendruck niedrig", "Vorne links 1,9 bar – bitte bei Gelegenheit prüfen.", 0L),
+                            onDismiss = {},
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
+                        )
+                    }
                 }
             }
         }
