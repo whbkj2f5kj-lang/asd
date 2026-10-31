@@ -118,7 +118,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     }
                     Hint("Gefundene Werte: ${scan.hits}" + if (scan.snapshots > 0) " · Messpunkte: ${scan.snapshots}" else "")
                     scan.idents.forEach { Hint("• $it") }
-                    TextButton(onClick = { vm.scanner.identify() }, enabled = !scan.busy) { Text("1. Steuergeräte erkennen") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { vm.scanner.identify() }, enabled = !scan.busy) { Text("1. Steuergeräte erkennen") }
+                        TextButton(onClick = { vm.scanner.adapterTest() }, enabled = !scan.busy) { Text("Adapter-Test") }
+                    }
                     Text("2. Scan wählen", color = J.text, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
                     ScanOption(
                         title = "Tiefen-Scan",

@@ -83,14 +83,33 @@ class SafeElm internal constructor(private val e: Elm327) {
      * und alle anderen sind über diesen Weg nicht erreichbar, request() sperrt Dienst 10 komplett.
      * Liefert true, wenn das Steuergerät zugestimmt hat (Antwort 50 03 / 50 01).
      */
+    fun sessionRaw(extended: Boolean): String = e.send(if (extended) "1003" else "1001", 1500)
+
     fun session(extended: Boolean): Boolean {
-        val cmd = if (extended) "1003" else "1001"
-        val raw = e.send(cmd, 1500)
+        val raw = sessionRaw(extended)
         val rep = DiagParser.parse(raw, 0x10)
         return rep is DiagParser.Reply.Positive && rep.hex.startsWith(if (extended) "5003" else "5001")
     }
 
+    /**
+     * Nur für den Adapter-Test: feste, ungefährliche Adapter-Befehle (Info, Protokoll, Kopfzeilen an/aus,
+     * Empfangsfilter, Zieladresse 7E0–7E7/7DF). Alles, was ans Auto geht, läuft weiter über [request].
+     */
+    fun probe(cmd: String, timeoutMs: Long = 1500): String {
+        val c = cmd.uppercase()
+        val ok = c in setOf("ATI", "AT@1", "ATDP", "ATDPN", "ATH1", "ATH0", "ATCRA") ||
+            c.matches(Regex("ATSH7E[0-7]|ATSH7DF|ATCRA7E[89A-F]"))
+        require(ok) { "Befehl im Test nicht erlaubt: $cmd" }
+        if (c.startsWith("ATSH")) header = c.removePrefix("ATSH")
+        if (c == "ATH1") headersOn = true
+        if (c == "ATH0") headersOn = false
+        return e.send(c, timeoutMs)
+    }
+
+    private var headersOn = false
+
     internal fun restore() {
+        if (headersOn) { runCatching { e.send("ATH0") }; headersOn = false }
         if (header != null && header != "7DF") {
             runCatching { e.send("ATCRA") }
             runCatching { e.send("ATSH7DF") }
@@ -324,6 +343,43 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
         _state.update { it.copy(idents = found.toList()) }
     }
 
+    // ---------- Adapter-Test: wer antwortet wirklich? (Kopfzeilen an -> Absender-ID sichtbar)
+
+    private val testLog = mutableListOf<String>()
+
+    fun adapterTest() = run("Adapter-Test läuft …") {
+        val log = mutableListOf<String>()
+        fun line(cmd: String, raw: String) {
+            log += "> $cmd  =>  " + raw.replace("\r", " | ").replace("\n", " | ").replace(Regex("( \\| )+"), " | ").trim(' ', '|')
+        }
+        adapter { e ->
+            for (c in listOf("ATI", "AT@1", "ATDP")) line(c, runCatching { e.probe(c) }.getOrElse { "Fehler: ${it.message}" })
+            line("ATH1", e.probe("ATH1"))
+            // Rundruf: alle Steuergeräte, die Gerätedaten liefern, melden sich mit ihrer Absender-ID
+            line("ATCRA", e.probe("ATCRA"))
+            line("ATSH7DF", e.probe("ATSH7DF"))
+            line("22F100 (Rundruf)", runCatching { e.request("22F100", 2500) }.getOrElse { "Fehler: ${it.message}" })
+            for (h in listOf("7E0", "7E1", "7E2")) {
+                line("ATSH$h", e.probe("ATSH$h"))
+                line("ATCRA (aus)", e.probe("ATCRA"))
+                for (cmd in listOf("22F100", "22F187", "221000", "222000", "1A86", "2101")) {
+                    line("$h $cmd", runCatching { e.request(cmd, 1500) }.getOrElse { "Fehler: ${it.message}" })
+                }
+                // erweiterte Sitzung: Antwort + derselbe unbekannte Wert noch einmal
+                line("$h 1003 (erweiterte Sitzung)", runCatching { e.sessionRaw(true) }.getOrElse { "Fehler: ${it.message}" })
+                for (cmd in listOf("22F100", "221000", "222000", "22F40D")) {
+                    line("$h $cmd (erw.)", runCatching { e.request(cmd, 1500) }.getOrElse { "Fehler: ${it.message}" })
+                }
+                line("$h 1001 (zurück)", runCatching { e.sessionRaw(false) }.getOrElse { "Fehler: ${it.message}" })
+            }
+            e.probe("ATCRA")
+            e.probe("ATH0")
+        }
+        testLog.clear()
+        testLog += log
+        _state.update { it.copy(idents = log.take(6)) }
+    }
+
     // ---------- 2) Werte suchen
 
     enum class Mode { QUICK, STANDARD, DEEP }
@@ -483,6 +539,10 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
                 appendLine("# Treffer: steuergeraet;adresse;anfrage;antwort;sitzung")
                 hits.values.filter { !(it.service == 0x22 && it.id in ReadOnly.privateDids) }
                     .forEach { appendLine("${it.ecu};${it.header};${it.command};${it.data};${if (it.ext) "erweitert" else "standard"}") }
+                if (testLog.isNotEmpty()) {
+                    appendLine("# Adapter-Test (Kopfzeilen an: erste 3 Zeichen = Absender-ID)")
+                    testLog.forEach { appendLine(it) }
+                }
                 if (rows.isNotEmpty()) {
                     appendLine("# Aufzeichnung")
                     appendLine(rowHeader)
