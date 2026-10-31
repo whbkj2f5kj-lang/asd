@@ -173,8 +173,8 @@ class SignReader(
             var weakHit = false
             if (sure && cr!!.cls == SignNet.NO_PASSING) {
                 dbgCand("ring", n, bl.w, cr, "Ueberholverbot")
-                events += SignEvent.NoPassing
-                if (cr.p >= 0.97f) strong += SignEvent.NoPassing.key
+                // Baustellenbaken und Lkw-Überholverbot sehen ähnlich aus: nur sehr sichere Treffer, nie nach einer einzigen Sichtung
+                if (cr.p >= 0.95f) events += SignEvent.NoPassing
                 boxes += SignBox(n[0], n[1], n[2], n[3], null, "Überholverbot")
                 continue
             }
@@ -242,8 +242,7 @@ class SignReader(
                     return@forEachIndexed
                 }
                 if (cr != null && cr.cls == SignNet.NO_PASSING && cr.p >= 0.85f) {
-                    events += SignEvent.NoPassing
-                    if (cr.p >= 0.97f) strong += SignEvent.NoPassing.key
+                    if (cr.p >= 0.95f) events += SignEvent.NoPassing
                     boxes += SignBox(n[0], n[1], n[2], n[3], null, "Überholverbot")
                     dbgCand("weiss", n, bl.w, cr, "Ueberholverbot")
                     return@forEachIndexed

@@ -518,14 +518,16 @@ private fun ScenePanel(
     Box(if (framed) modifier.panel() else modifier.clip(RoundedCornerShape(24.dp))) {
         // Kamera läuft immer (für die Erkennung), die Spuransicht liegt darüber
         if (camGranted && cameraBound && settings.cameraEnabled) {
-            CameraWithOverlay(vm, Modifier.fillMaxSize(), showHorizon = false, onClick = { if (showCamera) onExpand() })
+            // Kamera läuft immer (Erkennung), sichtbar aber nur in der Kamera-Ansicht
+            CameraWithOverlay(vm, Modifier.fillMaxSize().alpha(if (showCamera) 1f else 0f), showHorizon = false, onClick = { if (showCamera) onExpand() })
         }
         if (!showCamera) {
             val departure by vm.laneDeparture.collectAsStateWithLifecycle()
             LaneView(scene, speed, gapColor, Modifier.fillMaxSize(), transparent = !framed, departure = departure)
         }
 
-        Column(Modifier.align(Alignment.TopStart).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // unter den Reitern Assistent/Karte/Werte, damit nichts überlappt
+        Column(Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 50.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SpeedLimitSign(limit, over, Modifier.size(62.dp).clickable { vm.clearLimit() })
                 val prov by vm.provisional.collectAsStateWithLifecycle()
@@ -572,7 +574,7 @@ private fun ScenePanel(
                 it,
                 color = J.dim,
                 fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 88.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 124.dp)
                     .clickable(enabled = !camGranted, onClick = onRequestPermission),
             )
         }
