@@ -282,7 +282,17 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                             }
                         )
                         ms.error?.let { Hint("⚠ $it – bereits geladene Strecken funktionieren weiter.") }
-                        TextButton(onClick = { vm.map.clearCache() }) { Text("Kartenspeicher leeren", color = J.accent) }
+                        val ctx = LocalContext.current
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = {
+                                runCatching {
+                                    ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
+                            }) { Text("Standort-Einstellungen", color = J.accent) }
+                            TextButton(onClick = { vm.restartGps() }) { Text("GPS neu starten", color = J.accent) }
+                            TextButton(onClick = { vm.map.clearCache() }) { Text("Kartenspeicher leeren", color = J.dim) }
+                        }
+                        Hint("Erster Start nach langer Standzeit kann einige Minuten dauern (Radio-GPS hat oft keine Online-Hilfe wie ein Handy). Bleibt „0 sichtbar“, ist meist die GPS-Antenne nicht angeschlossen oder verdeckt.")
                     }
                     Hint("Kamera-Schilder haben Vorrang. Nach dem Abbiegen oder wenn laut Karte ein neuer Abschnitt beginnt, gilt wieder die Karte. Geschätzte Werte (≈) lösen keine Warnung aus. Daten werden für ~2×2 km geladen und 30 Tage gespeichert.")
                     Hint("Kartendaten © OpenStreetMap-Mitwirkende (ODbL)")

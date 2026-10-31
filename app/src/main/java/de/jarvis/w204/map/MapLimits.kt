@@ -78,42 +78,108 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
 
     fun start() {
         if (listener != null) return
-        if (!permitted()) { _state.value = State(gps = "Standort-Berechtigung fehlt"); return }
+        if (!permitted()) { _state.value = State(gps = "Standort-Berechtigung fehlt – App neu starten und erlauben"); return }
         val providers = runCatching { lm.allProviders }.getOrDefault(emptyList())
-        if (LocationManager.GPS_PROVIDER !in providers) { _state.value = State(gps = "Kein GPS im Gerät gefunden"); return }
+        if (LocationManager.GPS_PROVIDER !in providers && LocationManager.NETWORK_PROVIDER !in providers) {
+            _state.value = State(gps = "Kein GPS im Gerät gefunden (Anbieter: ${providers.joinToString()})"); return
+        }
         // Alle Methoden selbst umsetzen: unter Android 10 hat das Interface noch keine Standard-Methoden
         val l = object : LocationListener {
             override fun onLocationChanged(location: Location) = onLocation(location)
             @Deprecated("Deprecated in Java")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderEnabled(provider: String) { if (provider == LocationManager.GPS_PROVIDER) gpsOff = false }
             override fun onProviderDisabled(provider: String) {
-                _state.value = _state.value.copy(hasFix = false, gps = "GPS ist ausgeschaltet")
+                if (provider == LocationManager.GPS_PROVIDER) {
+                    gpsOff = true
+                    _state.value = _state.value.copy(hasFix = false, gps = "Standort ist am Radio ausgeschaltet")
+                }
             }
         }
-        try {
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, l, Looper.getMainLooper())
-        } catch (t: Throwable) {
-            _state.value = State(gps = "GPS nicht nutzbar: ${t.message}")
-            return
+        // GPS + (falls vorhanden) Netz/Fused als Rückfallebene
+        var any = false
+        for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused")) {
+            if (p !in providers) continue
+            try {
+                lm.requestLocationUpdates(p, 1000L, 0f, l, Looper.getMainLooper())
+                any = true
+            } catch (t: Throwable) {
+                Log.w(TAG, "Standortquelle $p nicht nutzbar", t)
+            }
         }
+        if (!any) { _state.value = State(gps = "GPS nicht nutzbar"); return }
         listener = l
-        _state.value = State(running = true, gps = "Warte auf GPS-Signal …")
+        startedAt = SystemClock.elapsedRealtime()
+        gpsOff = runCatching { !lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+
+        // Hilfsdaten für schnellen Start (A-GPS: Satellitenbahnen + Uhrzeit aus dem Internet)
+        runCatching { lm.sendExtraCommand(LocationManager.GPS_PROVIDER, "force_time_injection", null) }
+        runCatching { lm.sendExtraCommand(LocationManager.GPS_PROVIDER, "force_xtra_injection", null) }
+
+        // Satelliten zählen: zeigt, ob überhaupt Empfang da ist (Antenne!)
+        val cb = object : android.location.GnssStatus.Callback() {
+            override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
+                var used = 0
+                var good = 0
+                for (i in 0 until status.satelliteCount) {
+                    if (status.usedInFix(i)) used++
+                    if (status.getCn0DbHz(i) >= 25f) good++
+                }
+                satsVisible = status.satelliteCount
+                satsUsed = used
+                satsGood = good
+            }
+        }
+        runCatching { lm.registerGnssStatusCallback(cb, android.os.Handler(Looper.getMainLooper())) }
+        gnssCb = cb
+
+        // Letzte bekannte Position: Karte schon vorladen, bevor das GPS steht
+        providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .maxByOrNull { it.time }
+            ?.let { last -> scope.launch(Dispatchers.Default) { prefetch(last.latitude, last.longitude) } }
+
+        _state.value = State(running = true, gps = if (gpsOff) "Standort ist am Radio ausgeschaltet" else "Warte auf GPS-Signal …")
         watchdog = scope.launch {
             while (isActive) {
-                delay(5000)
+                delay(2000)
                 val s = _state.value
-                if (lastFix == 0L) continue
-                if (SystemClock.elapsedRealtime() - lastFix > 10_000 && s.hasFix) {
-                    _state.value = s.copy(hasFix = false, gps = "GPS-Signal verloren")
+                val now = SystemClock.elapsedRealtime()
+                val gpsFresh = now - lastGpsFix < 10_000
+                if (gpsOff) {
+                    _state.value = s.copy(hasFix = false, gps = "Standort ist am Radio ausgeschaltet – in den Android-Einstellungen einschalten")
+                } else if (!gpsFresh) {
+                    val sats = "Satelliten: $satsVisible sichtbar, $satsGood mit gutem Signal, $satsUsed genutzt"
+                    val wait = (now - startedAt) / 1000
+                    val head = when {
+                        lastGpsFix > 0 -> "GPS-Signal verloren"
+                        now - lastOtherFix < 10_000 -> "Nur ungefährer Standort (Netz)"
+                        else -> "Warte auf GPS-Signal (${wait / 60}:${"%02d".format(wait % 60)})"
+                    }
+                    val hint = when {
+                        wait > 120 && satsVisible == 0 -> " – keine Satelliten: GPS-Antenne am Radio prüfen"
+                        wait > 120 && satsGood < 4 -> " – Signal zu schwach: Antenne frei unter die Scheibe/aufs Dach"
+                        else -> ""
+                    }
+                    _state.value = s.copy(hasFix = now - lastOtherFix < 10_000 && s.hasFix, gps = "$head · $sats$hint")
                 }
             }
         }
     }
 
+    @Volatile private var gpsOff = false
+    @Volatile private var startedAt = 0L
+    @Volatile private var lastGpsFix = 0L
+    @Volatile private var lastOtherFix = 0L
+    @Volatile private var satsVisible = 0
+    @Volatile private var satsUsed = 0
+    @Volatile private var satsGood = 0
+    private var gnssCb: android.location.GnssStatus.Callback? = null
+
     fun stop() {
         listener?.let { runCatching { lm.removeUpdates(it) } }
         listener = null
+        gnssCb?.let { runCatching { lm.unregisterGnssStatusCallback(it) } }
+        gnssCb = null
         watchdog?.cancel()
         watchdog = null
         shown = null
@@ -122,7 +188,14 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
     }
 
     private fun onLocation(loc: Location) {
-        lastFix = SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
+        lastFix = now
+        val isGps = loc.provider == LocationManager.GPS_PROVIDER
+        if (isGps) lastGpsFix = now else {
+            lastOtherFix = now
+            // Netz-/Fused-Position nur nutzen, solange GPS nichts liefert
+            if (now - lastGpsFix < 5000) return
+        }
         if (!busy.compareAndSet(false, true)) return
         scope.launch(Dispatchers.Default) {
             try {
@@ -135,11 +208,23 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         }
     }
 
+    /** Kartenstücke rund um eine (auch ungenaue) Position schon laden */
+    private fun prefetch(lat: Double, lon: Double) {
+        val (ty, tx) = Osm.tileOf(lat, lon)
+        center = ty to tx
+        ensure(ty, tx)
+        for (dy in -1..1) for (dx in -1..1) if (dy != 0 || dx != 0) ensure(ty + dy, tx + dx)
+    }
+
     private fun process(loc: Location) {
         val acc = if (loc.hasAccuracy()) loc.accuracy.roundToInt() else null
-        val gpsText = "GPS ok" + (acc?.let { " ±$it m" } ?: "")
-        if (acc != null && acc > 40) {
-            _state.value = _state.value.copy(hasFix = false, gps = "GPS ungenau (±$acc m)")
+        val isGps = loc.provider == LocationManager.GPS_PROVIDER
+        val gpsText = (if (isGps) "GPS ok" else "Standort (Netz)") + (acc?.let { " ±$it m" } ?: "") +
+            (if (isGps) " · $satsUsed Satelliten" else "")
+        if (acc != null && acc < 1000) prefetch(loc.latitude, loc.longitude)
+        // Straßen zuordnen nur bei ausreichender Genauigkeit
+        if (acc != null && acc > (if (isGps) 40 else 25)) {
+            _state.value = _state.value.copy(hasFix = false, gps = "$gpsText – zu ungenau für die Straßenzuordnung")
             return
         }
         val (ty, tx) = Osm.tileOf(loc.latitude, loc.longitude)

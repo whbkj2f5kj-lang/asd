@@ -393,6 +393,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         recompute()
     }
 
+    fun restartGps() {
+        map.stop()
+        if (_settings.value.mapLimits) map.start()
+    }
+
     /** Nach der Berechtigungsabfrage: GPS ggf. jetzt starten */
     fun onPermissions() {
         applyRuntime(_settings.value)
