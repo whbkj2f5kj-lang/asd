@@ -154,29 +154,23 @@ fun LauncherHome(
             }
     ) {
         val fullW = maxWidth
-        val tileW = (fullW / 4.6f).coerceIn(150.dp, 300.dp)
+        // wie beim Original: fünf Kacheln nebeneinander, der Rest per Wischen
+        val gap = 8.dp
+        val tileW = ((fullW - 48.dp - gap * 4) / 5).coerceIn(140.dp, 320.dp)
         Column(Modifier.fillMaxSize()) {
             HomeTopBar(s, a)
             val list = rememberLazyListState()
             val snap = rememberSnapFlingBehavior(list)
-            // welche Kachel steht in der Mitte -> wird größer und heller
-            val centerIdx by remember {
-                derivedStateOf {
-                    val info = list.layoutInfo
-                    val mid = (info.viewportStartOffset + info.viewportEndOffset) / 2
-                    info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - mid) }?.index ?: 0
-                }
-            }
             LazyRow(
                 state = list,
                 flingBehavior = snap,
-                contentPadding = PaddingValues(horizontal = (fullW - tileW) / 2),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(gap),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
                 itemsIndexed(TILE_ORDER) { i, t ->
-                    val focus by animateFloatAsState(if (i == centerIdx) 1f else 0f, label = "focus")
+                    val focus = 1f
                     LauncherTile(
                         tile = t, app = s.tiles[t], s = s, a = a, focus = focus,
                         modifier = Modifier.width(tileW).fillMaxHeight(),
@@ -282,8 +276,8 @@ private fun LauncherTile(
                 // Lichtkegel unter dem Symbol
                 Canvas(Modifier.fillMaxSize()) {
                     drawOval(
-                        Brush.radialGradient(listOf(accent.copy(alpha = 0.10f + 0.22f * focus), Color.Transparent), center = Offset(size.width / 2, size.height * 0.86f), radius = size.width * 0.5f),
-                        topLeft = Offset(0f, size.height * 0.62f), size = Size(size.width, size.height * 0.48f),
+                        Brush.radialGradient(listOf(accent.copy(alpha = 0.20f), Color.Transparent), center = Offset(size.width / 2, size.height * 0.86f), radius = size.width * 0.4f),
+                        topLeft = Offset(size.width * 0.1f, size.height * 0.72f), size = Size(size.width * 0.8f, size.height * 0.28f),
                     )
                 }
                 if (tile == Tile.COCKPIT) CockpitMini(s, Modifier.fillMaxSize())
@@ -515,7 +509,7 @@ private fun DrawScope.drawGauge(c: Color) {
 private fun AppDrawer(s: LauncherState, a: LauncherActions, onClose: () -> Unit, onAssign: (Tile) -> Unit) {
     var menuFor by remember { mutableStateOf<AppEntry?>(null) }
     Column(
-        Modifier.fillMaxSize().background(Color(0xF205090F))
+        Modifier.fillMaxSize().background(Color(0xFC05090F))
             .pointerInput(Unit) {
                 var dy = 0f
                 detectVerticalDragGestures(onDragStart = { dy = 0f }, onDragEnd = { if (dy > 120f) onClose() }) { _, d -> dy += d }
