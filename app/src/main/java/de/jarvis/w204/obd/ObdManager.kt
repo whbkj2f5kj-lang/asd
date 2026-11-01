@@ -162,7 +162,8 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
         val boostPid = if (Pid.MAP_EXT.code in supported) Pid.MAP_EXT else Pid.MAP
         // Schnelle Werte jede Runde, langsame reihum (alte ELM-Klone schaffen ~10–20 Abfragen/s)
         val fast = listOf(Pid.RPM, Pid.SPEED, boostPid, Pid.LOAD).filter { it.code in supported }
-        val slow = listOf(Pid.COOLANT, Pid.EXHAUST, Pid.MAF, Pid.LAMBDA, Pid.FUEL_RATE, Pid.IAT, Pid.BARO, Pid.AMBIENT, Pid.RAIL, Pid.FUEL, Pid.OIL_TEMP)
+        val slow = listOf(Pid.COOLANT, Pid.EXHAUST, Pid.MAF, Pid.LAMBDA, Pid.FUEL_RATE, Pid.IAT, Pid.BARO, Pid.AMBIENT, Pid.RAIL, Pid.FUEL, Pid.OIL_TEMP,
+            Pid.DPF_PRESS, Pid.DPF_TEMP, Pid.AFTERTREAT)
             .filter { it.code in supported }
 
         var cycle = 0
@@ -204,7 +205,8 @@ class ObdManager(private val context: Context, private val scope: CoroutineScope
                     val r = e.send(pid.command + suffix)
                     timeouts = 0
                     count++
-                    val d = ObdParser.data(r, pid.code, pid.bytes)
+                    // lange Antworten (mehrteilig) über den Nachrichten-Parser
+                    val d = ObdParser.data(r, pid.code, pid.bytes) ?: ObdParser.parseMulti(r, listOf(pid))[pid]
                     if (d != null) {
                         gotAny = true
                         _vehicle.update { ObdParser.apply(it, pid, d) }

@@ -19,7 +19,10 @@ enum class Pid(val code: Int, val bytes: Int) {
     MAP_EXT(0x87, 5),
     BARO(0x33, 1),
     AMBIENT(0x46, 1),
-    OIL_TEMP(0x5C, 1);
+    OIL_TEMP(0x5C, 1),
+    DPF_PRESS(0x7A, 7),
+    DPF_TEMP(0x7C, 9),
+    AFTERTREAT(0x8B, 7);
 
     val command: String get() = "01%02X".format(code)
 }
@@ -89,6 +92,35 @@ object ObdParser {
         Pid.FUEL -> s.copy(fuelLevel = d[0] * 100 / 255)
         Pid.BARO -> s.copy(baroKpa = d[0])
         Pid.AMBIENT -> s.copy(ambient = d[0] - 40)
+        // 7A: A = Unterstützt-Bits, B-C Differenzdruck (vorzeichenbehaftet, 1/100 kPa)
+        Pid.DPF_PRESS -> {
+            val raw = d[1] * 256 + d[2]
+            val v = (if (raw >= 0x8000) raw - 0x10000 else raw) / 100.0
+            if (d[0] and 0x01 != 0 && v in -20.0..200.0) s.copy(dpfDeltaKpa = v) else s
+        }
+        // 7C: B-C Eingang, D-E Ausgang (1/10 °C, −40)
+        Pid.DPF_TEMP -> {
+            val tin = (d[1] * 256 + d[2]) / 10 - 40
+            val tout = (d[3] * 256 + d[4]) / 10 - 40
+            s.copy(
+                dpfInletTemp = tin.takeIf { d[0] and 0x01 != 0 && it in -40..1000 } ?: s.dpfInletTemp,
+                dpfOutletTemp = tout.takeIf { d[0] and 0x02 != 0 && it in -40..1000 } ?: s.dpfOutletTemp,
+            )
+        }
+        // 8B: B Bit 0 = Regeneration aktiv, C = Auslöser (/2,55 %), D-E Ø Minuten, F-G Ø km zwischen Regenerationen
+        Pid.AFTERTREAT -> {
+            if (d[0] == 0) s else {
+                val trig = (d[2] * 100 / 255)
+                val min = d[3] * 256 + d[4]
+                val km = d[5] * 256 + d[6]
+                s.copy(
+                    regenEcu = (d[1] and 0x01) != 0,
+                    regenTrigger = trig,
+                    regenAvgMin = min.takeIf { it in 1..20000 },
+                    regenAvgKm = km.takeIf { it in 1..5000 },
+                )
+            }
+        }
     }
 
     /**

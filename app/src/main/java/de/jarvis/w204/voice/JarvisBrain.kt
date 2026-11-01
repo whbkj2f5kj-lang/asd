@@ -108,7 +108,17 @@ class JarvisBrain(private val jarvis: Jarvis) {
 
         // DPF-Regeneration: Abgas vor dem Filter dauerhaft sehr heiß (normal < ~400 °C, Regeneration ~550–650 °C)
         val ex = s.exhaustTemp
-        if (ex != null && s.engineRunning) {
+        val ecu = s.regenEcu
+        if (ecu != null && s.engineRunning) {
+            // Steuergerät meldet es direkt (PID 8B) – genauer als über die Temperatur
+            if (ecu && !regenActive) {
+                regenActive = true
+                jarvis.say("Der Partikelfilter regeneriert gerade. Wenn möglich weiterfahren und den Motor nicht abstellen.", "regen", 20 * 60_000)
+            } else if (!ecu && regenActive) {
+                regenActive = false
+                jarvis.say("Regeneration des Partikelfilters ist abgeschlossen.", "regen_end", 10 * 60_000)
+            }
+        } else if (ex != null && s.engineRunning) {
             if (ex >= 480) {
                 coolSince = 0L
                 if (hotSince == 0L) hotSince = now

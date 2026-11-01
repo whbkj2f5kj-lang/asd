@@ -48,6 +48,19 @@ data class VehicleState(
     val exhaustTemp: Int? = null,
     /** Motoröltemperatur (Standard-PID 0x5C, nur wenn das Steuergerät sie liefert) */
     val oilTemp: Int? = null,
+    // ---- genormte Diesel-Werte (SAE J1979), nur wenn das Steuergerät sie meldet
+    /** Differenzdruck über dem Partikelfilter in kPa (PID 7A) */
+    val dpfDeltaKpa: Double? = null,
+    /** Temperatur vor/nach dem Partikelfilter (PID 7C) */
+    val dpfInletTemp: Int? = null,
+    val dpfOutletTemp: Int? = null,
+    /** Regeneration laut Steuergerät aktiv (PID 8B) */
+    val regenEcu: Boolean? = null,
+    /** Regenerations-Auslöser in % (PID 8B) */
+    val regenTrigger: Int? = null,
+    /** Durchschnittlicher Abstand zwischen Regenerationen (PID 8B) */
+    val regenAvgKm: Int? = null,
+    val regenAvgMin: Int? = null,
 ) {
     /** Ladedruck relativ zur Umgebung in bar */
     val boostBar: Double?
