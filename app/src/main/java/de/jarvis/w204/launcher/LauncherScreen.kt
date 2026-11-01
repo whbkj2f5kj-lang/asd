@@ -65,6 +65,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -258,7 +259,7 @@ private const val STAGE_HORIZON = 0.615f
  */
 @Composable
 private fun Stage(modifier: Modifier, horizonY: Float, glow: Float) {
-    val img = androidx.compose.ui.res.imageResource(de.jarvis.w204.R.drawable.mb_stage)
+    val img = ImageBitmap.imageResource(de.jarvis.w204.R.drawable.mb_stage)
     Canvas(modifier) {
         val w = size.width; val h = size.height
         val hy = h * horizonY
@@ -596,5 +597,5 @@ private fun bundledIcon(id: String): ImageBitmap? {
         "radio" -> de.jarvis.w204.R.drawable.mb_radio
         else -> return null
     }
-    return androidx.compose.ui.res.imageResource(res)
+    return ImageBitmap.imageResource(res)
 }
