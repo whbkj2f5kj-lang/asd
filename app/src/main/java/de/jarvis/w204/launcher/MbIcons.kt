@@ -65,9 +65,10 @@ private fun DrawScope.note() {
         addOval(androidx.compose.ui.geometry.Rect(w * 0.08f, h * 0.70f, w * 0.38f, h * 0.92f))
         addOval(androidx.compose.ui.geometry.Rect(w * 0.56f, h * 0.60f, w * 0.86f, h * 0.82f))
     }
-    drawPath(path, Color(0x55FF4FD8), style = Stroke(w * 0.07f))
-    drawPath(path, Brush.linearGradient(listOf(Color.White, Color(0xFFF4EEFF), Color(0xFFCFC2E8)), Offset(0f, 0f), Offset(w, h)))
-    drawPath(path, Color(0xFFFF5FDF), style = Stroke(w * 0.018f))
+    // weicher rosa Schein dahinter, dann weiße Glanzfläche
+    drawPath(path, Color(0x33FF4FD8), style = Stroke(w * 0.08f))
+    drawPath(path, Color(0x66FF6FE0), style = Stroke(w * 0.035f))
+    drawPath(path, Brush.linearGradient(listOf(Color.White, Color(0xFFF7F2FF), Color(0xFFD9CDEB)), Offset(0f, 0f), Offset(w, h)))
     // Glanz auf dem Balken
     drawLine(Color(0xAAFFFFFF), Offset(w * 0.37f, h * 0.2f), Offset(w * 0.83f, h * 0.095f), w * 0.02f, StrokeCap.Round)
 }
@@ -75,29 +76,33 @@ private fun DrawScope.note() {
 // ---------------------------------------------------------------- Telefon: Hörer + Funkwellen
 private fun DrawScope.handset() {
     val w = size.width; val h = size.height
-    val body = Path().apply {
-        moveTo(w * 0.10f, h * 0.84f)
-        cubicTo(w * 0.08f, h * 0.60f, w * 0.30f, h * 0.30f, w * 0.62f, h * 0.20f)
-        cubicTo(w * 0.70f, h * 0.17f, w * 0.80f, h * 0.18f, w * 0.84f, h * 0.24f)
-        cubicTo(w * 0.86f, h * 0.30f, w * 0.80f, h * 0.33f, w * 0.72f, h * 0.33f)
-        cubicTo(w * 0.52f, h * 0.36f, w * 0.30f, h * 0.56f, w * 0.24f, h * 0.84f)
-        cubicTo(w * 0.22f, h * 0.92f, w * 0.12f, h * 0.92f, w * 0.10f, h * 0.84f)
-        close()
+    val silver = Brush.linearGradient(SILVER, Offset(w * 0.15f, h * 0.2f), Offset(w * 0.55f, h * 0.85f))
+    // Griff
+    val handle = Path().apply {
+        moveTo(w * 0.22f, h * 0.74f)
+        cubicTo(w * 0.22f, h * 0.50f, w * 0.40f, h * 0.30f, w * 0.66f, h * 0.27f)
     }
-    drawPath(body, Brush.linearGradient(SILVER, Offset(w * 0.1f, h * 0.2f), Offset(w * 0.6f, h * 0.9f)))
-    drawPath(body, Color(0x66FFFFFF), style = Stroke(w * 0.01f))
-    drawPath(Path().apply {
-        moveTo(w * 0.16f, h * 0.78f); cubicTo(w * 0.18f, h * 0.58f, w * 0.36f, h * 0.36f, w * 0.64f, h * 0.25f)
-    }, Color(0xCCFFFFFF), style = Stroke(w * 0.022f, cap = StrokeCap.Round))
-    // Wellen (waagerecht gestapelt, grün-türkis)
-    val c = Offset(w * 0.56f, h * 0.52f)
+    drawPath(handle, Color(0x55000000), style = Stroke(w * 0.15f, cap = StrokeCap.Round))
+    drawPath(handle, silver, style = Stroke(w * 0.12f, cap = StrokeCap.Round))
+    // Hör- und Sprechmuschel
+    rotate(-62f, pivot = p(0.21f, 0.80f)) {
+        drawOval(silver, p(0.08f, 0.73f), Size(w * 0.26f, h * 0.15f))
+        drawOval(Color(0x88FFFFFF), p(0.10f, 0.745f), Size(w * 0.2f, h * 0.05f))
+    }
+    rotate(-18f, pivot = p(0.72f, 0.25f)) {
+        drawOval(silver, p(0.58f, 0.18f), Size(w * 0.28f, h * 0.15f))
+        drawOval(Color(0x88FFFFFF), p(0.61f, 0.195f), Size(w * 0.2f, h * 0.05f))
+    }
+    drawPath(Path().apply { moveTo(w * 0.25f, h * 0.66f); cubicTo(w * 0.27f, h * 0.48f, w * 0.40f, h * 0.35f, w * 0.60f, h * 0.30f) },
+        Color(0xBBFFFFFF), style = Stroke(w * 0.02f, cap = StrokeCap.Round))
+    // Wellen (grün-türkis)
+    val c = Offset(w * 0.56f, h * 0.56f)
     for (i in 0 until 4) {
-        val r = w * (0.14f + i * 0.075f)
-        val a = 0.95f - i * 0.2f
+        val r = w * (0.12f + i * 0.07f)
         drawArc(
-            Color(0xFF3DF2B0).copy(alpha = a), -38f, 76f, false,
+            Color(0xFF3DF2B0).copy(alpha = 0.95f - i * 0.2f), -40f, 80f, false,
             topLeft = Offset(c.x - r, c.y - r * 0.55f), size = Size(r * 2, r * 1.1f),
-            style = Stroke(w * 0.035f, cap = StrokeCap.Round),
+            style = Stroke(w * 0.032f, cap = StrokeCap.Round),
         )
     }
 }

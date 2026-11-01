@@ -259,10 +259,13 @@ private fun Stage(modifier: Modifier, horizonY: Float, glow: Float) {
         drawRect(Brush.radialGradient(listOf(Color(0xFF1E9BFF).copy(alpha = 0.55f * glow), Color.Transparent), Offset(w * 0.5f, h * 0.12f), w * 0.36f))
         // Boden
         drawRect(Brush.verticalGradient(listOf(Color(0xFF0B5DB4), Color(0xFF07336B), Color(0xFF020814)), hy, h), Offset(0f, hy), Size(w, h - hy))
-        drawRect(Brush.radialGradient(listOf(Color(0xFF29A5FF).copy(alpha = 0.55f * glow), Color.Transparent), Offset(w * 0.5f, hy), w * 0.48f), Offset(0f, hy - h * 0.15f), Size(w, h * 0.5f))
+        // elliptischer Lichtschein am Horizont (ohne harte Kanten)
+        androidx.compose.ui.graphics.drawscope.scale(1f, 0.32f, pivot = Offset(w * 0.5f, hy)) {
+            drawCircle(Brush.radialGradient(listOf(Color(0xFF35B0FF).copy(alpha = 0.6f * glow), Color(0xFF1C7FE0).copy(alpha = 0.25f * glow), Color.Transparent), Offset(w * 0.5f, hy), w * 0.5f), w * 0.5f, Offset(w * 0.5f, hy))
+        }
         // Horizontlinie
         drawLine(Brush.horizontalGradient(listOf(Color.Transparent, Color(0xFF8FD3FF).copy(alpha = 0.9f * glow), Color.Transparent)), Offset(0f, hy), Offset(w, hy), 2.2f)
-        drawRect(Brush.verticalGradient(listOf(Color(0x5539C6FF), Color.Transparent), hy - h * 0.06f, hy), Offset(0f, hy - h * 0.06f), Size(w, h * 0.06f))
+        drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color(0x3339C6FF)), hy - h * 0.05f, hy), Offset(0f, hy - h * 0.05f), Size(w, h * 0.05f))
         // Punkteboden (weiter weg = kleiner, enger, blasser)
         val rows = 9
         for (r in 0 until rows) {
@@ -368,7 +371,7 @@ private fun EntryColumn(e: Entry, s: LauncherState, a: LauncherActions, modifier
     val pressed by src.collectIsPressedAsState()
     val press by animateFloatAsState(if (pressed) 1f else 0f, tween(140), label = "press")
     BoxWithConstraints(modifier) {
-        val iconSize = minOf(maxWidth * 0.66f, iconBase * 0.80f)
+        val iconSize = minOf(maxWidth * 0.80f, iconBase * 0.82f)
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             // Symbol steht auf dem Horizont
             Box(
