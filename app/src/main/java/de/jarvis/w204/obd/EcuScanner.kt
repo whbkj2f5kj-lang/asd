@@ -375,6 +375,20 @@ class EcuScanner(private val context: Context, private val obd: ObdManager, priv
             for (cmd in listOf("0100", "0120", "0140", "0160", "0180", "01A0", "01C0", "0600", "0620", "0640", "0660", "0680", "06A0")) {
                 line("$cmd (Rundruf)", runCatching { e.request(cmd, 2000) }.getOrElse { "Fehler: ${it.message}" })
             }
+            // Motor direkt: Unterstützt-Listen + Diesel-Werte (DPF, Regeneration) als Rohantwort
+            line("ATSH7E0", e.probe("ATSH7E0"))
+            line("ATCRA7E8", e.probe("ATCRA7E8"))
+            for (cmd in listOf("0100", "0120", "0140", "0160", "0180", "017A", "017C", "018B", "0105", "010C", "010F", "0159", "0101")) {
+                line("7E0 $cmd", runCatching { e.request(cmd, 2500) }.getOrElse { "Fehler: ${it.message}" })
+            }
+            // Getriebe: Öltemperatur-Kandidat aus dem Forum (KWP 21 30, Formel 12. Datenbyte − 50)
+            line("ATSH7E1", e.probe("ATSH7E1"))
+            line("ATCRA7E9 (nur Antworten vom Getriebe)", e.probe("ATCRA7E9"))
+            for (cmd in listOf("2130", "2101", "2120", "1A86")) {
+                line("7E1 $cmd (Filter 7E9)", runCatching { e.request(cmd, 2500) }.getOrElse { "Fehler: ${it.message}" })
+            }
+            line("ATCRA (aus)", e.probe("ATCRA"))
+            line("7E1 2130 (ohne Filter)", runCatching { e.request("2130", 2500) }.getOrElse { "Fehler: ${it.message}" })
             for (h in listOf("7E0", "7E1", "7E2")) {
                 line("ATSH$h", e.probe("ATSH$h"))
                 line("ATCRA (aus)", e.probe("ATCRA"))
