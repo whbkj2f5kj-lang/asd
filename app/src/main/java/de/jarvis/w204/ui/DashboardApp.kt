@@ -111,6 +111,9 @@ fun DashboardApp(vm: MainViewModel) {
     val faults = faultCodes.size
     val faultSeverity = faultCodes.maxOfOrNull { it.info.severity } ?: 0
     var showSettings by remember { mutableStateOf(settings.deviceAddress == null && !settings.demo) }
+    // Startbildschirm -> "Einstellungen"
+    val settingsReq by vm.openSettingsRequest.collectAsStateWithLifecycle()
+    LaunchedEffect(settingsReq) { if (settingsReq > 0L) showSettings = true }
     var cameraFull by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
     var camGranted by remember { mutableStateOf(hasPermission(context, Manifest.permission.CAMERA)) }
@@ -164,7 +167,7 @@ fun DashboardApp(vm: MainViewModel) {
                     tireSummary(vm, tires, settings).first else null,
                 tireLevel = tireSummary(vm, tires, settings).second,
                 onTires = { showTires = true },
-                extra = { DashcamButton(vm) },
+                extra = { HomeButton { vm.showHome() }; Spacer(Modifier.width(10.dp)); DashcamButton(vm) },
                 sweepKey = startupAt,
                 driveMode = if (settings.driveModeLook && status.live) driveMode.label else null,
             ) {
@@ -188,7 +191,7 @@ fun DashboardApp(vm: MainViewModel) {
             }
         } else Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
             TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true },
-                faults = faults, faultSeverity = faultSeverity, onDiagnose = { showDiagnose = true }, extra = { DashcamButton(vm) })
+                faults = faults, faultSeverity = faultSeverity, onDiagnose = { showDiagnose = true }, extra = { HomeButton { vm.showHome() }; Spacer(Modifier.width(10.dp)); DashcamButton(vm) })
             Spacer(Modifier.height(10.dp))
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DrivePanel(vehicle, Modifier.weight(1.05f).fillMaxHeight())
@@ -716,5 +719,17 @@ private fun FullscreenCamera(vm: MainViewModel, camGranted: Boolean, limit: Int?
                 valueRange = 0.3f..0.7f,
             )
         }
+    }
+}
+
+
+/** Zurück zum Startbildschirm (wie die Home-Taste) */
+@Composable
+internal fun HomeButton(onClick: () -> Unit) {
+    Box(
+        Modifier.size(34.dp).clip(CircleShape).background(J.panel2).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Home, contentDescription = "Startbildschirm", tint = J.dim, modifier = Modifier.size(20.dp))
     }
 }

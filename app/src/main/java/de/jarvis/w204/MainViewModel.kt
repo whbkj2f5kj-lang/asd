@@ -27,6 +27,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _settings = MutableStateFlow(prefs.load())
     val settings: StateFlow<Settings> = _settings
 
+    // ---- Startbildschirm (Launcher)
+    val apps = de.jarvis.w204.launcher.AppRepo(app)
+    /** true = Startbildschirm, false = Cockpit */
+    val home = MutableStateFlow(!_settings.value.startCockpit)
+    val drawer = MutableStateFlow(false)
+    /** Cockpit soll seine Einstellungen öffnen (vom Startbildschirm aus) */
+    val openSettingsRequest = MutableStateFlow(0L)
+    fun showHome() { home.value = true }
+    fun showCockpit(page: Int? = null) {
+        if (page != null) update { it.copy(centerPage = page) }
+        drawer.value = false
+        home.value = false
+    }
+    /** Home-Taste des Radios: Cockpit -> Startbildschirm, App-Raster -> zu */
+    fun homePressed() {
+        if (home.value) drawer.value = false else home.value = true
+    }
+    fun requestSettings() {
+        home.value = false
+        openSettingsRequest.value = android.os.SystemClock.elapsedRealtime()
+    }
+
     val obd = ObdManager(app, viewModelScope)
     val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
     val tpms = de.jarvis.w204.tpms.TpmsManager(app, viewModelScope)
@@ -697,6 +719,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        apps.close()
         tpms.release()
         runCatching { tone?.release() }
         debugLog.stop()

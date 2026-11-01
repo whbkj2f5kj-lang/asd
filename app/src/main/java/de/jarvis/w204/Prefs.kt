@@ -45,6 +45,8 @@ data class Settings(
     val centerPage: Int = 0,
     /** Farbwelt folgt dem Fahrstil (Komfort / Sport / Eco) */
     val driveModeLook: Boolean = true,
+    /** beim Start direkt das Cockpit statt des Startbildschirms zeigen */
+    val startCockpit: Boolean = false,
 ) {
     val calibration: Calibration get() = Calibration(camHeight, horizon, camFov)
 }
@@ -84,6 +86,7 @@ class Prefs(context: Context) {
         signProvisional = sp.getBoolean("signProv", true),
         centerPage = sp.getInt("centerPage", 0),
         driveModeLook = sp.getBoolean("driveLook", true),
+        startCockpit = sp.getBoolean("startCockpit", false),
     )
 
     fun save(s: Settings) {
@@ -118,6 +121,7 @@ class Prefs(context: Context) {
             .putBoolean("signProv", s.signProvisional)
             .putInt("centerPage", s.centerPage)
             .putBoolean("driveLook", s.driveModeLook)
+            .putBoolean("startCockpit", s.startCockpit)
             .putFloat("horizon", s.horizon)
             .apply()
     }

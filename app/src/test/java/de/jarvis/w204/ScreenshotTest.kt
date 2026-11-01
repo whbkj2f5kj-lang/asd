@@ -195,6 +195,34 @@ class ScreenshotTest {
         return ways to houses
     }
 
+    @Test fun launcher() {
+        val apps = listOf("Bluetooth", "Car Settings", "Music", "ZLINK", "Amap Auto", "YouTube", "DSP", "Video", "Original car info")
+            .map { de.jarvis.w204.launcher.AppEntry("p." + it.lowercase().replace(" ", ""), "c", it) }
+        val tiles = de.jarvis.w204.launcher.Tile.entries.filter { it.assignable }.associateWith { de.jarvis.w204.launcher.guessTile(it, apps) }
+        paparazzi.snapshot {
+            JarvisTheme {
+                de.jarvis.w204.launcher.LauncherHome(
+                    de.jarvis.w204.launcher.LauncherState(car, 100, false, "OBD verbunden", true, "17:58", tiles, apps),
+                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = false, onDrawer = {},
+                )
+            }
+        }
+    }
+
+    @Test fun launcherApps() {
+        val apps = listOf("Bluetooth", "Car Settings", "Music", "Bluetooth Music", "DSP", "Image", "File Explorer", "Google", "YouTube", "ZLINK", "CarAPP", "Amap Auto")
+            .map { de.jarvis.w204.launcher.AppEntry("p." + it.lowercase().replace(" ", ""), "c", it) }
+        paparazzi.snapshot {
+            JarvisTheme {
+                de.jarvis.w204.launcher.LauncherHome(
+                    de.jarvis.w204.launcher.LauncherState(car, 100, false, "OBD verbunden", true, "17:58", emptyMap(), apps,
+                        homes = listOf(de.jarvis.w204.launcher.AppEntry("com.android.launcher3", "L", "Launcher"))),
+                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = true, onDrawer = {},
+                )
+            }
+        }
+    }
+
     @Test fun map3d() {
         val (ways, houses) = city()
         paparazzi.snapshot {

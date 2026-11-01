@@ -34,7 +34,21 @@ object CrashGuard {
     @Volatile var pending: Report? = null
         private set
 
+    private lateinit var times: SharedPreferences
+
+    /** Abstürze der letzten [windowMs] (für den Notausgang zum Original-Startbildschirm) */
+    fun recentCrashes(windowMs: Long): Int {
+        if (!::times.isInitialized) return 0
+        val now = System.currentTimeMillis()
+        return (times.getString("t", "") ?: "").split(',').mapNotNull { it.toLongOrNull() }.count { now - it < windowMs }
+    }
+
+    fun clearCrashTimes() {
+        if (::times.isInitialized) times.edit().remove("t").commit()
+    }
+
     fun install(context: Context) {
+        times = context.getSharedPreferences("crashtimes", Context.MODE_PRIVATE)
         sp = context.getSharedPreferences("crashguard", Context.MODE_PRIVATE)
         dir = context.filesDir
 
@@ -53,6 +67,11 @@ object CrashGuard {
 
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val now = System.currentTimeMillis()
+                val old = (times.getString("t", "") ?: "").split(',').mapNotNull { it.toLongOrNull() }.filter { now - it < 600_000L }
+                times.edit().putString("t", (old + now).joinToString(",")).commit()
+            }
             runCatching {
                 val time = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.GERMANY).format(Date())
                 File(dir, FILE).writeText(
