@@ -8,6 +8,9 @@ data class Settings(
     val deviceName: String? = null,
     val demo: Boolean = false,
     val voice: Boolean = true,
+    /** gewählte Stimme / Sprach-Engine (null = Standard des Radios) */
+    val ttsVoice: String? = null,
+    val ttsEngine: String? = null,
     val announceSigns: Boolean = true,
     val tolerance: Int = 5,
     val signRecognition: Boolean = true,
@@ -57,6 +60,8 @@ class Prefs(context: Context) {
         deviceName = sp.getString("name", null),
         demo = sp.getBoolean("demo", false),
         voice = sp.getBoolean("voice", true),
+        ttsVoice = sp.getString("ttsVoice", null),
+        ttsEngine = sp.getString("ttsEngine", null),
         announceSigns = sp.getBoolean("announce", true),
         tolerance = sp.getInt("tol", 5),
         signRecognition = sp.getBoolean("signs", true),
@@ -92,6 +97,8 @@ class Prefs(context: Context) {
             .putString("name", s.deviceName)
             .putBoolean("demo", s.demo)
             .putBoolean("voice", s.voice)
+            .putString("ttsVoice", s.ttsVoice)
+            .putString("ttsEngine", s.ttsEngine)
             .putBoolean("announce", s.announceSigns)
             .putInt("tol", s.tolerance)
             .putBoolean("signs", s.signRecognition)

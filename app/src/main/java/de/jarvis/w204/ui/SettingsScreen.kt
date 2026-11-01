@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -197,6 +198,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Spacer(Modifier.height(12.dp))
                     Section("Ansagen")
                     SwitchRow("Sprachansagen", settings.voice) { on -> vm.update { it.copy(voice = on) } }
+                    if (settings.voice) VoicePicker(vm)
                     SwitchRow("Erkannte Tempolimits ansagen", settings.announceSigns) { on -> vm.update { it.copy(announceSigns = on) } }
                     Spacer(Modifier.height(6.dp))
                     Text("Warnung ab Tempolimit + ${settings.tolerance} km/h", color = J.text, fontSize = 15.sp)
@@ -415,4 +417,52 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
         Text(label, color = J.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange)
     }
+}
+
+
+/** Stimme für die Ansagen wählen (alle deutschen Stimmen der installierten Sprachausgabe) */
+@Composable
+private fun VoicePicker(vm: MainViewModel) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val voices by vm.jarvis.voices.collectAsStateWithLifecycle()
+    val engines = remember(voices) { vm.jarvis.engines() }
+    val current = vm.jarvis.currentEngine()
+    if (engines.size > 1) {
+        Text("Sprachausgabe", color = J.text, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp))
+        Column(Modifier.padding(vertical = 4.dp)) {
+            engines.forEach { (pkg, label) ->
+                val sel = pkg == current
+                Text(
+                    label, color = if (sel) Color.Black else J.text, fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(50))
+                        .background(if (sel) J.accent else J.panel2)
+                        .clickable { vm.update { it.copy(ttsEngine = pkg, ttsVoice = null) } }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+    Text("Stimme", color = J.text, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp))
+    if (voices.isEmpty()) Hint("Keine deutsche Stimme zur Auswahl gefunden – es wird die Standardstimme benutzt.")
+    Column(Modifier.padding(vertical = 4.dp)) {
+        voices.forEach { v ->
+            val sel = v.name == settings.ttsVoice
+            Text(
+                v.label, color = if (sel) Color.Black else J.text, fontSize = 14.sp,
+                modifier = Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(50))
+                    .background(if (sel) J.accent else J.panel2)
+                    .clickable {
+                        vm.update { it.copy(ttsVoice = v.name) }
+                        vm.jarvis.setVoice(v.name)
+                        vm.jarvis.preview()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            )
+        }
+    }
+    Text(
+        "Probe hören", color = J.accent, fontSize = 14.sp,
+        modifier = Modifier.clickable { vm.jarvis.preview() }.padding(vertical = 6.dp),
+    )
+    Hint("Antippen = auswählen und Probe hören. Die natürlichsten Stimmen hat die App „Sprachausgabe von Google“ (Play Store): danach in den Android-Einstellungen unter Sprache → Sprachausgabe die deutsche Stimme herunterladen. Stimmen mit „braucht Internet“ klingen am besten, fallen ohne Netz aber auf eine einfache Stimme zurück.")
 }

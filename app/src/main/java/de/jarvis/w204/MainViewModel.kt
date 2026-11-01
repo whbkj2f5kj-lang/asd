@@ -633,6 +633,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun applyRuntime(s: Settings) {
         tpms.setEnabled(s.tpms)
         jarvis.speakEnabled = s.voice
+        jarvis.setEngine(s.ttsEngine)
+        jarvis.setVoice(s.ttsVoice)
         vision.signsEnabled = s.signRecognition
         vision.objectsEnabled = s.objectRecognition
         vision.calibration = s.calibration

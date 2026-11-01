@@ -25,6 +25,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,12 +52,14 @@ fun DashcamButton(vm: MainViewModel) {
     val dbg by vm.debugRec.collectAsStateWithLifecycle()
     val on = settings.dashcam || dbg
     val recording = on && st.recording
+    var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val stop = { if (dbg) vm.setDebugRecording(false) else vm.update { it.copy(dashcam = false) }; vm.jarvis.say("Aufnahme beendet.") }
+    Box {
     Row(
         Modifier.clip(RoundedCornerShape(50))
             .background(if (recording) Color(0x33FF3B30) else J.panel2)
-            .combinedClickable(onClick = { vm.dashcamTap() }, onLongClick = {
-                if (dbg) vm.setDebugRecording(false) else if (on) vm.update { it.copy(dashcam = false) }
-            })
+            // aus -> einschalten; an -> Auswahl "sichern" / "beenden"; lange drücken -> beenden
+            .combinedClickable(onClick = { if (on) menu = true else vm.dashcamTap() }, onLongClick = { if (on) stop() })
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -77,6 +80,20 @@ fun DashcamButton(vm: MainViewModel) {
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
         )
+    }
+    androidx.compose.material3.DropdownMenu(
+        expanded = menu, onDismissRequest = { menu = false },
+        modifier = Modifier.background(J.panel2),
+    ) {
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("Video sichern", color = J.text, fontSize = 16.sp) },
+            onClick = { menu = false; vm.dashcamTap() },
+        )
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("Aufnahme beenden", color = Color(0xFFFF8A80), fontSize = 16.sp) },
+            onClick = { menu = false; stop() },
+        )
+    }
     }
 }
 
@@ -125,7 +142,7 @@ fun DashcamSettings(vm: MainViewModel) {
             }
         }
     }
-    DcHint("Videos: Movies/W204-Dashcam · gesicherte in …/Gesichert (werden nie automatisch gelöscht). Sichern: REC-Knopf antippen, „Video sichern“ sagen oder automatisch bei starker Bremsung – dann bleiben die letzte Minute davor und 30 s danach erhalten. REC lange drücken = Dashcam aus. Aufnahme nur, solange die App im Vordergrund ist; kein Ton.")
+    DcHint("Videos: Movies/W204-Dashcam · gesicherte in …/Gesichert (werden nie automatisch gelöscht). Sichern: REC-Knopf antippen, „Video sichern“ sagen oder automatisch bei starker Bremsung – dann bleiben die letzte Minute davor und 30 s danach erhalten. REC antippen = Auswahl „Video sichern“ / „Aufnahme beenden“ (lange drücken beendet direkt). Aufnahme nur, solange die App im Vordergrund ist; kein Ton.")
     DcHint("Hinweis Datenschutz: Dauerhaftes, anlassloses Filmen ist in Deutschland problematisch. Empfohlen ist ein kurzer Ringspeicher (3 Min) und Sichern nur bei einem Ereignis.")
 }
 

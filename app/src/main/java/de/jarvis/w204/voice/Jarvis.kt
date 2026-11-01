@@ -10,8 +10,58 @@ import java.util.Locale
 
 /** Jarvis' Stimme: deutsche Sprachausgabe, Musik wird dabei leiser (wie bei Navi-Ansagen). */
 class Jarvis(context: Context) : TextToSpeech.OnInitListener {
-    private val tts = TextToSpeech(context.applicationContext, this)
+    private val ctx = context.applicationContext
+    @Volatile private var tts = TextToSpeech(ctx, this)
     @Volatile private var ready = false
+    /** gewünschte Stimme (Name) und Sprach-Engine (Paket); null = Standard */
+    @Volatile private var wantVoice: String? = null
+    @Volatile private var engine: String? = null
+
+    /** Eine auswählbare deutsche Stimme */
+    data class VoiceOption(val name: String, val label: String, val online: Boolean, val quality: Int)
+
+    private val _voices = MutableStateFlow<List<VoiceOption>>(emptyList())
+    val voices: StateFlow<List<VoiceOption>> = _voices
+
+    /** installierte Sprach-Engines (Paket -> Name) */
+    fun engines(): List<Pair<String, String>> = runCatching { tts.engines.map { it.name to it.label } }.getOrDefault(emptyList())
+    fun currentEngine(): String? = runCatching { engine ?: tts.defaultEngine }.getOrNull()
+
+    /** Engine wechseln (z. B. Google-Sprachausgabe statt der eingebauten) */
+    fun setEngine(pkg: String?) {
+        if (pkg == engine) return
+        engine = pkg
+        ready = false
+        runCatching { tts.stop(); tts.shutdown() }
+        tts = if (pkg == null) TextToSpeech(ctx, this) else TextToSpeech(ctx, this, pkg)
+    }
+
+    fun setVoice(name: String?) {
+        wantVoice = name
+        if (ready) applyVoice()
+    }
+
+    private fun applyVoice() {
+        val list = runCatching { tts.voices?.toList() }.getOrNull().orEmpty()
+            .filter { it.locale.language == "de" && !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .sortedWith(compareBy<android.speech.tts.Voice>({ it.isNetworkConnectionRequired }, { -it.quality }, { it.name }))
+        _voices.value = list.mapIndexed { i, v ->
+            val q = when {
+                v.quality >= android.speech.tts.Voice.QUALITY_VERY_HIGH -> "sehr gut"
+                v.quality >= android.speech.tts.Voice.QUALITY_HIGH -> "gut"
+                else -> "einfach"
+            }
+            VoiceOption(v.name, "Stimme ${i + 1} · $q" + (if (v.isNetworkConnectionRequired) " · braucht Internet" else ""), v.isNetworkConnectionRequired, v.quality)
+        }
+        val v = list.firstOrNull { it.name == wantVoice }
+        if (v != null) runCatching { tts.voice = v }
+    }
+
+    /** Probe: kurzer Satz mit der gewählten Stimme */
+    fun preview() {
+        if (!ready) return
+        tts.speak("Guten Tag. Öltemperatur 85 Grad, alles in Ordnung.", TextToSpeech.QUEUE_FLUSH, null, "preview")
+    }
     @Volatile var speakEnabled = true
     private val cooldowns = HashMap<String, Long>()
     @Volatile private var pending = 0
@@ -35,8 +85,10 @@ class Jarvis(context: Context) : TextToSpeech.OnInitListener {
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) { pending = (pending - 1).coerceAtLeast(0) }
         })
-        tts.setPitch(0.92f)
-        tts.setSpeechRate(1.02f)
+        // natürliche Stimmen klingen unverändert am besten
+        tts.setPitch(1.0f)
+        tts.setSpeechRate(1.0f)
+        applyVoice()
     }
 
     /** Jede tatsächlich ausgegebene Meldung (Text, Schlüssel) – für die Warnkarten im Cockpit */

@@ -44,7 +44,18 @@ fun ChevronGauge(
     mirrored: Boolean,
     modifier: Modifier = Modifier,
     redFrom: Float? = null,
+    /** Motor kalt: Bereich darüber wird "eingefroren" (eisblau) dargestellt, wie bei BMW M */
+    warmLimit: Float? = null,
 ) {
+    // Warmlaufgrenze gleitet weich nach oben, Eis blendet beim Auftauchen ein und schimmert kurz
+    val warmTarget = warmLimit?.coerceIn(min, max) ?: max
+    val warmAnim by animateFloatAsState(warmTarget, tween(1200), label = "warm")
+    val iceAlpha by animateFloatAsState(if (warmLimit != null && warmLimit < max) 1f else 0f, tween(900), label = "ice")
+    val shimmer = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(1f) }
+    val cold = warmLimit != null && warmLimit < max
+    androidx.compose.runtime.LaunchedEffect(cold) {
+        if (cold) { shimmer.snapTo(0f); shimmer.animateTo(1f, tween(2600)) }
+    }
     val target = value?.coerceIn(min, max) ?: min
     val animated by animateFloatAsState(target, tween(180), label = "chevron")
     val measurer = rememberTextMeasurer()
@@ -156,24 +167,57 @@ fun ChevronGauge(
             }
         }
 
+        // Warmlaufbereich: eisblau "eingefroren" über der Grenze
+        if (iceAlpha > 0.01f) {
+            val yw = yOf(warmAnim)
+            val ice = Color(0xFF7FD0FF)
+            clipRect(bottom = minOf(yw, yv)) {
+                clipPath(band) {
+                    drawPath(band, Brush.verticalGradient(listOf(ice.copy(alpha = 0.55f * iceAlpha), Color(0xFF2F7FD8).copy(alpha = 0.30f * iceAlpha)), startY = topY, endY = yw))
+                    // feine Eiskristall-Schraffur
+                    val step = w * 0.03f
+                    var x = -h
+                    while (x < w + h) {
+                        drawLine(Color.White.copy(alpha = 0.10f * iceAlpha), Offset(x, topY), Offset(x + (botY - topY), botY), strokeWidth = 1f)
+                        x += step
+                    }
+                    // Schimmer läuft beim Kaltstart einmal durch
+                    if (shimmer.value < 1f) {
+                        val sy = topY + (yw - topY) * shimmer.value
+                        drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.White.copy(alpha = 0.55f), Color.Transparent), startY = sy - h * 0.06f, endY = sy + h * 0.06f))
+                    }
+                }
+            }
+            // Grenzlinie
+            if (yw < botY && yw > topY) {
+                val a = Offset(mx(outerX(yw) - w * 0.01f), yw)
+                val b = Offset(mx(outerX(yw) + t + w * 0.01f), yw)
+                drawLine(ice.copy(alpha = 0.35f * iceAlpha), a, b, strokeWidth = h * 0.02f, cap = StrokeCap.Round)
+                drawLine(Color.White.copy(alpha = iceAlpha), a, b, strokeWidth = h * 0.005f, cap = StrokeCap.Round)
+            }
+        }
+
         // Skala im Band + Beschriftung außen
         val labelStyle = TextStyle(color = J.dim, fontSize = (h * 0.045f).toSp())
         val redLabelStyle = labelStyle.copy(color = J.danger)
+        val iceLabelStyle = labelStyle.copy(color = Color(0xFF8FD8FF))
         for (v in ticks) {
             val y = yOf(v)
             val ox = outerX(y)
             val text = label(v)
             val major = text != null
             val inRed = redFrom != null && v >= redFrom
+            val inIce = iceAlpha > 0.5f && v > warmAnim
             val len = if (major) t * 0.42f else t * 0.24f
             val tickColor = when {
+                inIce -> Color(0xFF8FD8FF).copy(alpha = 0.9f)
                 inRed -> J.danger.copy(alpha = 0.9f)
                 y >= yv && value != null -> Color.Black.copy(alpha = 0.35f)
                 else -> Color.White.copy(alpha = if (major) 0.45f else 0.25f)
             }
             drawLine(tickColor, Offset(mx(ox + 2f), y), Offset(mx(ox + len), y), strokeWidth = if (major) 2.2f else 1.4f)
             if (text != null) {
-                val layout = measurer.measure(text, if (inRed) redLabelStyle else labelStyle)
+                val layout = measurer.measure(text, if (inIce) iceLabelStyle else if (inRed) redLabelStyle else labelStyle)
                 val gap = w * 0.05f
                 val lx = if (mirrored) mx(ox) + gap else ox - gap - layout.size.width
                 drawText(layout, topLeft = Offset(lx, y - layout.size.height / 2f))

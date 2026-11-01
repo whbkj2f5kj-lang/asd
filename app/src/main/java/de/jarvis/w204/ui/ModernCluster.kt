@@ -207,6 +207,7 @@ fun ModernCluster(
                         label = { if (it.toInt() % 1000 == 0) (it.toInt() / 1000).toString() else null },
                         unit = "×1000 U/min",
                         mirrored = true,
+                        warmLimit = if (sweeping) null else warmUpLimit(v.oilTemp ?: v.coolant),
                         redFrom = W204Profile.RPM_RED_FROM,
                         modifier = Modifier.weight(0.58f).fillMaxHeight(),
                     )
@@ -331,4 +332,17 @@ private fun Stat(value: String?, unit: String, dot: Color?, label: String? = nul
         Spacer(Modifier.width(3.dp))
         Text(unit, color = J.dim, fontSize = 16.sp)
     }
+}
+
+
+/**
+ * Drehzahlgrenze im Warmlauf (Diesel): kalt bis ca. 2.500/min schonen, ab ~75 °C Öl frei.
+ * null = Motor warm (keine Begrenzung) oder Temperatur unbekannt.
+ */
+fun warmUpLimit(tempC: Int?): Float? {
+    val t = tempC ?: return null
+    if (t >= 75) return null
+    val f = ((t - 20).coerceAtLeast(0)) / 55f
+    val rpm = 2500f + f * (W204Profile.RPM_RED_FROM - 2500f)
+    return (rpm / 100f).toInt() * 100f
 }

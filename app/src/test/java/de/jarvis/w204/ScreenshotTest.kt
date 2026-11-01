@@ -135,6 +135,22 @@ class ScreenshotTest {
         }
     }
 
+    /** Kaltstart: Drehzahlbereich über der Warmlaufgrenze eisblau */
+    @Test
+    fun modernColdStart() = paparazzi.snapshot {
+        JarvisTheme {
+            ModernCluster(
+                v = car.copy(oilTemp = 25, coolant = 30, rpm = 1100),
+                status = ObdStatus(ConnState.CONNECTED, "Verbunden", rate = 14.0),
+                message = null,
+                clock = "07:12",
+                listening = false,
+                onMic = {},
+                onSettings = {},
+            ) {}
+        }
+    }
+
     @Test
     fun modernOverRevAndSpeeding() = paparazzi.snapshot {
         JarvisTheme {
