@@ -47,7 +47,9 @@ enum class Tile(val id: String, val title: String, val keywords: List<String>) {
     PHONE("phone", "Telefon", listOf("bluetooth", "phone", "telefon", "dialer", "蓝牙", "bt")),
     CAR("car", "Fahrzeug", listOf("original", "原车", "carinfo", "car info", "canbus", "can bus", "oem", "vehicle")),
     VIDEO("video", "Video", listOf("video", "youtube", "movie", "视频")),
-    SETTINGS("settings", "Einstellungen", listOf("car settings", "carsetting", "car setting", "设置", "settings", "einstellungen")),
+    SETTINGS("settings", "Komfort", listOf("car settings", "carsetting", "car setting", "设置", "settings", "einstellungen")),
+    RADIO("radio", "Radio", listOf("radio", "fm", "tuner", "收音机", "dab")),
+    SOUND("sound", "Klang", listOf("dsp", "equalizer", "sound", "eq", "音效")),
     APPS("apps", "Alle Apps", emptyList());
 
     /** nur diese Kacheln starten fremde Apps */
@@ -68,6 +70,59 @@ class AppRepo(context: Context) {
     private val _tiles = MutableStateFlow<Map<Tile, AppEntry?>>(emptyMap())
     val tiles: StateFlow<Map<Tile, AppEntry?>> = _tiles
 
+    // ---- eigene Symbole (bleiben nur auf dem Gerät, im App-Speicher)
+    private val iconDir = java.io.File(ctx.filesDir, "symbole").apply { mkdirs() }
+    private val _customIcons = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+    val customIcons: StateFlow<Map<String, ImageBitmap>> = _customIcons
+
+    private fun loadCustomIcons() {
+        _customIcons.value = (iconDir.listFiles() ?: emptyArray()).mapNotNull { f ->
+            val id = f.nameWithoutExtension.lowercase(Locale.ROOT)
+            runCatching { android.graphics.BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() }.getOrNull()?.let { id to it }
+        }.toMap()
+    }
+
+    /**
+     * Bilder aus einem gewählten Ordner übernehmen (navi.png, medien.png, …).
+     * Werden in den App-Speicher kopiert – der Ordner muss danach nicht bleiben.
+     */
+    fun importIcons(tree: android.net.Uri, ids: List<String>, onDone: (Int) -> Unit) {
+        scope.launch {
+            var n = 0
+            runCatching {
+                val cr = ctx.contentResolver
+                val treeId = android.provider.DocumentsContract.getTreeDocumentId(tree)
+                val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId)
+                cr.query(children, arrayOf(
+                    android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                ), null, null, null)?.use { c ->
+                    while (c.moveToNext()) {
+                        val docId = c.getString(0)
+                        val name = c.getString(1) ?: continue
+                        val id = name.substringBeforeLast('.').lowercase(Locale.ROOT)
+                        if (id !in ids) continue
+                        val uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, docId)
+                        val bmp = cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: continue
+                        // auf vernünftige Größe bringen (Speicher)
+                        val maxSide = 512
+                        val sc = minOf(1f, maxSide / maxOf(bmp.width, bmp.height).toFloat())
+                        val out = if (sc < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * sc).toInt(), (bmp.height * sc).toInt(), true) else bmp
+                        java.io.File(iconDir, "$id.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                        n++
+                    }
+                }
+            }
+            loadCustomIcons()
+            onDone(n)
+        }
+    }
+
+    fun clearCustomIcons() {
+        iconDir.listFiles()?.forEach { it.delete() }
+        loadCustomIcons()
+    }
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) = refresh()
     }
@@ -82,6 +137,7 @@ class AppRepo(context: Context) {
             })
         }
         refresh()
+        scope.launch { loadCustomIcons() }
     }
 
     fun refresh() {

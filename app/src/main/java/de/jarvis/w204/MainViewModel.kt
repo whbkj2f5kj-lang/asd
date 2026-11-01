@@ -32,8 +32,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** true = Startbildschirm, false = Cockpit */
     val home = MutableStateFlow(!_settings.value.startCockpit)
     val drawer = MutableStateFlow(false)
-    /** Cockpit soll seine Einstellungen öffnen (vom Startbildschirm aus) */
-    val openSettingsRequest = MutableStateFlow(0L)
+    /** Cockpit soll einen Dialog öffnen (vom Startbildschirm aus): settings / diag / tires */
+    val cockpitDialog = MutableStateFlow<Pair<String, Long>?>(null)
+    /** zuletzt gezeigte Seite der Symbolreihe */
+    var launcherPage = 0
     fun showHome() { home.value = true }
     fun showCockpit(page: Int? = null) {
         if (page != null) update { it.copy(centerPage = page) }
@@ -44,9 +46,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun homePressed() {
         if (home.value) drawer.value = false else home.value = true
     }
-    fun requestSettings() {
+    fun requestSettings() = requestDialog("settings")
+    fun requestDialog(which: String) {
         home.value = false
-        openSettingsRequest.value = android.os.SystemClock.elapsedRealtime()
+        cockpitDialog.value = which to android.os.SystemClock.elapsedRealtime()
     }
 
     val obd = ObdManager(app, viewModelScope)

@@ -59,6 +59,27 @@ fun LauncherSettings(vm: MainViewModel) {
         Btn("App-Liste exportieren") { vm.apps.export { exported = it ?: "Fehler beim Speichern" } }
     }
     exported?.let { Text("Gespeichert: $it – bitte an Claude schicken.", color = J.dim, fontSize = 13.sp) }
+
+    // Eigene Symbole
+    var iconMsg by remember { mutableStateOf<String?>(null) }
+    val custom by vm.apps.customIcons.collectAsStateWithLifecycle()
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            iconMsg = "Lade …"
+            vm.apps.importIcons(uri, ICON_IDS) { n -> iconMsg = if (n == 0) "Keine passenden Bilder gefunden." else "$n Symbole übernommen." }
+        }
+    }
+    Row(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Btn("Eigene Symbole laden (Ordner wählen)") { pick.launch(null) }
+        if (custom.isNotEmpty()) Btn("Eigene Symbole entfernen") { vm.apps.clearCustomIcons(); iconMsg = "Entfernt – wieder Standard-Symbole." }
+    }
+    Text(
+        "Bilder (PNG/JPG, am besten mit durchsichtigem Hintergrund) in einen Ordner legen und so benennen: " +
+            ICON_IDS.joinToString(", ") { "$it.png" } + ". Fehlende Bilder bleiben Standard. " +
+            "Die Bilder bleiben nur auf diesem Radio." + (if (custom.isNotEmpty()) " Aktiv: ${custom.keys.sorted().joinToString()}." else ""),
+        color = J.dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp),
+    )
+    iconMsg?.let { Text(it, color = J.accent, fontSize = 13.sp) }
     Text(
         "Kacheln: lange drücken, um eine andere App zu wählen. Im App-Raster eine App lange drücken, um sie auf eine Kachel zu legen. " +
             "Der Original-Startbildschirm bleibt installiert: im App-Raster oben „Original-Startbildschirm“. " +

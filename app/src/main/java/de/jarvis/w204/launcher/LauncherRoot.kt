@@ -63,6 +63,7 @@ fun LauncherRoot(vm: MainViewModel) {
             val settings by vm.settings.collectAsStateWithLifecycle()
             val tiles by vm.apps.tiles.collectAsStateWithLifecycle()
             val apps by vm.apps.apps.collectAsStateWithLifecycle()
+            val customIcons by vm.apps.customIcons.collectAsStateWithLifecycle()
             val clock = rememberClock()
             // andere Startbildschirme (Original-Launcher) selten neu abfragen
             var homesTick by remember { mutableIntStateOf(0) }
@@ -80,11 +81,15 @@ fun LauncherRoot(vm: MainViewModel) {
                 tiles = tiles,
                 apps = apps,
                 homes = homes,
+                customIcons = customIcons,
+                page = vm.launcherPage,
             )
             val actions = remember {
                 LauncherActions(
                     openCockpit = { vm.showCockpit(it) },
                     openSettings = { vm.requestSettings() },
+                    openDialog = { vm.requestDialog(it) },
+                    pageChanged = { vm.launcherPage = it },
                     launch = { app ->
                         if (!vm.apps.launch(app)) Toast.makeText(context, "${app.label} lässt sich nicht starten", Toast.LENGTH_SHORT).show()
                     },

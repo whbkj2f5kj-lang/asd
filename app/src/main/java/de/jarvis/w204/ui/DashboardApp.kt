@@ -113,8 +113,14 @@ fun DashboardApp(vm: MainViewModel) {
     val faultSeverity = faultCodes.maxOfOrNull { it.info.severity } ?: 0
     var showSettings by remember { mutableStateOf(settings.deviceAddress == null && !settings.demo) }
     // Startbildschirm -> "Einstellungen"
-    val settingsReq by vm.openSettingsRequest.collectAsStateWithLifecycle()
-    LaunchedEffect(settingsReq) { if (settingsReq > 0L) showSettings = true }
+    val dialogReq by vm.cockpitDialog.collectAsStateWithLifecycle()
+    LaunchedEffect(dialogReq) {
+        when (dialogReq?.first) {
+            "settings" -> showSettings = true
+            "diag" -> showDiagnose = true
+            "tires" -> showTires = true
+        }
+    }
     var cameraFull by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
     var camGranted by remember { mutableStateOf(hasPermission(context, Manifest.permission.CAMERA)) }

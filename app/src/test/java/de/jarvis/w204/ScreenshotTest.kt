@@ -203,7 +203,18 @@ class ScreenshotTest {
             JarvisTheme {
                 de.jarvis.w204.launcher.LauncherHome(
                     de.jarvis.w204.launcher.LauncherState(car, 100, false, "OBD verbunden", true, "17:58", tiles, apps),
-                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = false, onDrawer = {},
+                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = false, onDrawer = {}, animate = false,
+                )
+            }
+        }
+    }
+
+    @Test fun launcherPage2() {
+        paparazzi.snapshot {
+            JarvisTheme {
+                de.jarvis.w204.launcher.LauncherHome(
+                    de.jarvis.w204.launcher.LauncherState(car, 100, false, "OBD verbunden", true, "17:58", emptyMap(), emptyList(), page = 1),
+                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = false, onDrawer = {}, animate = false,
                 )
             }
         }
@@ -217,7 +228,7 @@ class ScreenshotTest {
                 de.jarvis.w204.launcher.LauncherHome(
                     de.jarvis.w204.launcher.LauncherState(car, 100, false, "OBD verbunden", true, "17:58", emptyMap(), apps,
                         homes = listOf(de.jarvis.w204.launcher.AppEntry("com.android.launcher3", "L", "Launcher"))),
-                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = true, onDrawer = {},
+                    de.jarvis.w204.launcher.LauncherActions(), drawerOpen = true, onDrawer = {}, animate = false,
                 )
             }
         }
