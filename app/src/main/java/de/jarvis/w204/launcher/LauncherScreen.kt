@@ -415,10 +415,6 @@ private fun EntryColumn(e: Entry, s: LauncherState, a: LauncherActions, modifier
                     .combinedClickable(interactionSource = src, indication = null, onClick = e.open, onLongClick = onLong),
                 contentAlignment = Alignment.BottomCenter,
             ) {
-                // Lichtschein am Fuß (stärker beim Drücken)
-                Canvas(Modifier.width(iconSize * 1.3f).height(iconSize * 0.5f).offset(y = iconSize * 0.2f)) {
-                    drawOval(Brush.radialGradient(listOf(Color(0xFF9FD8FF).copy(alpha = 0.35f + 0.4f * press), Color.Transparent), center, size.width / 2f))
-                }
                 val custom = s.customIcons[e.id] ?: bundledIcon(e.id)
                 val m = Modifier.padding(bottom = iconSize * 0.04f).size(iconSize).graphicsLayer {
                     val sc = 1f - 0.06f * press
