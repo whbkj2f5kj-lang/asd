@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -260,7 +261,7 @@ private fun Stage(modifier: Modifier, horizonY: Float, glow: Float) {
         // Boden
         drawRect(Brush.verticalGradient(listOf(Color(0xFF0B5DB4), Color(0xFF07336B), Color(0xFF020814)), hy, h), Offset(0f, hy), Size(w, h - hy))
         // elliptischer Lichtschein am Horizont (ohne harte Kanten)
-        androidx.compose.ui.graphics.drawscope.scale(1f, 0.32f, pivot = Offset(w * 0.5f, hy)) {
+        scale(1f, 0.32f, pivot = Offset(w * 0.5f, hy)) {
             drawCircle(Brush.radialGradient(listOf(Color(0xFF35B0FF).copy(alpha = 0.6f * glow), Color(0xFF1C7FE0).copy(alpha = 0.25f * glow), Color.Transparent), Offset(w * 0.5f, hy), w * 0.5f), w * 0.5f, Offset(w * 0.5f, hy))
         }
         // Horizontlinie
