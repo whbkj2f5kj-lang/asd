@@ -69,8 +69,15 @@ fun LauncherSettings(vm: MainViewModel) {
             vm.apps.importIcons(uri, ICON_IDS) { n -> iconMsg = if (n == 0) "Keine passenden Bilder gefunden." else "$n Symbole übernommen." }
         }
     }
+    val pickZip = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            iconMsg = "Lade …"
+            vm.apps.importIconZip(uri, ICON_IDS) { n -> iconMsg = if (n == 0) "Keine passenden Bilder in der ZIP-Datei." else "$n Symbole übernommen." }
+        }
+    }
     Row(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Btn("Eigene Symbole laden (Ordner wählen)") { pick.launch(null) }
+        Btn("Symbol-Paket (ZIP) laden") { pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }
+        Btn("Aus Ordner laden") { pick.launch(null) }
         if (custom.isNotEmpty()) Btn("Eigene Symbole entfernen") { vm.apps.clearCustomIcons(); iconMsg = "Entfernt – wieder Standard-Symbole." }
     }
     Text(

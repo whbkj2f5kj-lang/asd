@@ -118,6 +118,32 @@ class AppRepo(context: Context) {
         }
     }
 
+    /** Symbol-Paket als ZIP-Datei (navi.png, medien.png, … darin, auch in Unterordnern) */
+    fun importIconZip(zip: android.net.Uri, ids: List<String>, onDone: (Int) -> Unit) {
+        scope.launch {
+            var n = 0
+            runCatching {
+                ctx.contentResolver.openInputStream(zip)?.use { raw ->
+                    java.util.zip.ZipInputStream(raw).use { zs ->
+                        while (true) {
+                            val e = zs.nextEntry ?: break
+                            if (e.isDirectory) continue
+                            val id = e.name.substringAfterLast('/').substringBeforeLast('.').lowercase(Locale.ROOT)
+                            if (id !in ids) continue
+                            val bmp = android.graphics.BitmapFactory.decodeStream(zs) ?: continue
+                            val sc = minOf(1f, 512f / maxOf(bmp.width, bmp.height))
+                            val out = if (sc < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * sc).toInt(), (bmp.height * sc).toInt(), true) else bmp
+                            java.io.File(iconDir, "$id.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                            n++
+                        }
+                    }
+                }
+            }
+            loadCustomIcons()
+            onDone(n)
+        }
+    }
+
     fun clearCustomIcons() {
         iconDir.listFiles()?.forEach { it.delete() }
         loadCustomIcons()
