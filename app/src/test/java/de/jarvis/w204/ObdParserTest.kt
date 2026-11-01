@@ -103,7 +103,7 @@ class ObdParserTest {
         v = ObdParser.apply(v, Pid.DPF_PRESS, intArrayOf(0x07, 0x00, 0x96, 0x27, 0x10, 0x27, 0x10))
         org.junit.Assert.assertEquals(1.5, v.dpfDeltaKpa!!, 0.001)
         v = ObdParser.apply(v, Pid.DPF_TEMP, intArrayOf(0x03, 0x16, 0x76, 0x10, 0x68, 0, 0, 0, 0))
-        org.junit.Assert.assertEquals(530, v.dpfInletTemp)     // 0x1676 = 5750 -> 575 - 40
+        org.junit.Assert.assertEquals(535, v.dpfInletTemp)     // 0x1676 = 5750 -> 575 - 40
         org.junit.Assert.assertEquals(380, v.dpfOutletTemp)    // 0x1068 = 4200 -> 420 - 40
         v = ObdParser.apply(v, Pid.AFTERTREAT, intArrayOf(0x3F, 0x01, 0xCC, 0x01, 0x2C, 0x01, 0xC2))
         org.junit.Assert.assertEquals(true, v.regenEcu)
