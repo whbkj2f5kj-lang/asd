@@ -63,12 +63,6 @@ fun CenterPager(vm: MainViewModel, modifier: Modifier = Modifier, assistant: @Co
     LaunchedEffect(pager) {
         snapshotFlow { pager.settledPage }.collect { p -> if (p != vm.settings.value.centerPage) vm.update { it.copy(centerPage = p) } }
     }
-    // vom Startbildschirm aus eine Seite gewählt (Knöpfe "Karte"/"Werte")
-    LaunchedEffect(settings.centerPage) {
-        val p = settings.centerPage.coerceIn(0, 2)
-        if (p != pager.settledPage) pager.scrollToPage(p)
-    }
-    val visible = de.jarvis.w204.launcher.LocalCockpitVisible.current
     val inset = LocalCenterInset.current
     androidx.compose.foundation.layout.BoxWithConstraints(modifier) {
         // Anteil der Breite, ab dem die Mitte beginnt; bis dahin wird die Karte weich eingeblendet
@@ -86,7 +80,7 @@ fun CenterPager(vm: MainViewModel, modifier: Modifier = Modifier, assistant: @Co
                 when (page) {
                     0 -> Box(Modifier.fillMaxSize(), content = assistant)
                     1 -> MapView3D(
-                        vm, active = pager.currentPage == 1 && visible,
+                        vm, active = pager.currentPage == 1,
                         modifier = Modifier.fillMaxSize().softEdges(fadeFrom, fadeTo, top = 0.02f, bottom = 0.10f),
                         viewFraction = 1f - 2f * f,
                     )

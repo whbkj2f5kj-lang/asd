@@ -287,9 +287,6 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     Hint("Erkennt runde Tempolimit-Schilder (10–130). Nur als Hinweis – es gilt immer die echte Beschilderung.")
 
                     Spacer(Modifier.height(12.dp))
-                    de.jarvis.w204.launcher.LauncherSettings(vm)
-
-                    Spacer(Modifier.height(12.dp))
                     DashcamSettings(vm)
 
                     Spacer(Modifier.height(12.dp))
