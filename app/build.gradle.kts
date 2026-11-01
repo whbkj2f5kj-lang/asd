@@ -13,8 +13,8 @@ android {
         applicationId = "de.jarvis.w204"
         minSdk = 29          // Android 10 (Head-Unit)
         targetSdk = 34
-        versionCode = 41
-        versionName = "5.1"
+        versionCode = 42
+        versionName = "5.2"
         // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
         val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         ndk { abiFilters += abis }
@@ -55,6 +55,8 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
+    // Standort wie Google Maps & Co. (GPS + WLAN + Mobilfunk gemischt) – falls Google-Dienste auf dem Radio sind
+    implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")

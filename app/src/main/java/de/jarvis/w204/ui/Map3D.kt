@@ -161,7 +161,7 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier,
             p == null && !ms.running -> "Karte: GPS aus (Einstellungen → Tempolimits aus Karte)"
             p == null -> "Warte auf GPS …\n${ms.gps}"
             ways.isEmpty() && ms.error != null -> "Keine Kartendaten: ${ms.error}\n(Internet/Hotspot am Radio prüfen)"
-            ways.isEmpty() && ms.tiles == 0 -> "Kartendaten werden geladen …\n${if (ms.loading) "Download läuft" else "noch keine Kartenstücke"}"
+            ways.isEmpty() && ms.tiles == 0 -> "Kartendaten werden geladen …\n${if (ms.loading) "Download läuft" else "noch keine Kartenstücke"}" + (ms.lastDownload?.let { " · letzter Download $it" } ?: "")
             ways.isEmpty() -> "Keine Straßen an dieser Position (${ms.tiles} Kartenstücke geladen)"
             else -> null
         }

@@ -61,6 +61,8 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val speedMs: Float? = null,
         /** monotone Zeit der Position (ms) */
         val fixAt: Long = 0L,
+        /** Dauer des letzten Kartendownloads (Anzeige) */
+        val lastDownload: String? = null,
     )
 
     private val ctx = context.applicationContext
@@ -127,9 +129,10 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
                 if (provider == LocationManager.GPS_PROVIDER) gpsOff = true
             }
         }
-        // GPS + (falls vorhanden) Netz/Fused als Rückfallebene
+        // GPS + (falls vorhanden) Netz/Fused als Rückfallebene; "passive" bekommt zusätzlich jede Position,
+        // die andere Apps (Navi, CarPlay …) gerade abfragen
         var any = false
-        for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused")) {
+        for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused", LocationManager.PASSIVE_PROVIDER)) {
             if (p !in providers) continue
             try {
                 lm.requestLocationUpdates(p, if (p == LocationManager.GPS_PROVIDER) 0L else 1000L, 0f, l, Looper.getMainLooper())
@@ -138,6 +141,9 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
                 Log.w(TAG, "Standortquelle $p nicht nutzbar", t)
             }
         }
+        // Google-Standortdienst: dieselbe Quelle wie Google Maps – liefert oft schon eine Position,
+        // wenn der GPS-Chip allein noch keinen Fix hat
+        if (startGms()) any = true
         if (!any) { _state.value = State(gps = "GPS nicht nutzbar"); return }
         listener = l
         startedAt = SystemClock.elapsedRealtime()
@@ -193,9 +199,37 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         }
     }
 
+    private var gmsClient: com.google.android.gms.location.FusedLocationProviderClient? = null
+    private var gmsCb: com.google.android.gms.location.LocationCallback? = null
+    @Volatile private var lastGmsFix = 0L
+
+    private fun startGms(): Boolean = try {
+        val avail = com.google.android.gms.common.GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(ctx)
+        if (avail != com.google.android.gms.common.ConnectionResult.SUCCESS) false else {
+            val client = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(ctx)
+            val req = com.google.android.gms.location.LocationRequest.Builder(
+                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 1000L,
+            ).setMinUpdateIntervalMillis(500L).setWaitForAccurateLocation(false).build()
+            val cb = object : com.google.android.gms.location.LocationCallback() {
+                override fun onLocationResult(r: com.google.android.gms.location.LocationResult) {
+                    lastGmsFix = SystemClock.elapsedRealtime()
+                    r.locations.forEach { onLocation(it) }
+                }
+            }
+            client.requestLocationUpdates(req, cb, Looper.getMainLooper())
+            gmsClient = client
+            gmsCb = cb
+            true
+        }
+    } catch (t: Throwable) {
+        Log.w(TAG, "Google-Standort nicht verfügbar", t)
+        false
+    }
+
     @Volatile private var gpsOff = false
     @Volatile private var startedAt = 0L
     @Volatile private var lastGpsFix = 0L
+    @Volatile private var lastChipFix = 0L
     @Volatile private var lastOtherFix = 0L
     @Volatile private var satsVisible = 0
     @Volatile private var satsUsed = 0
@@ -207,6 +241,9 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         listener = null
         gnssCb?.let { runCatching { lm.unregisterGnssStatusCallback(it) } }
         gnssCb = null
+        gmsCb?.let { cb -> runCatching { gmsClient?.removeLocationUpdates(cb) } }
+        gmsCb = null
+        gmsClient = null
         watchdog?.cancel()
         watchdog = null
         synchronized(filterLock) { filter.pose?.let { savePos(it, force = true) } }
@@ -221,6 +258,7 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val acc = if (loc.hasAccuracy()) loc.accuracy else 50f
         // Fused (Google) ist meist GPS-gestützt: genau genug zählt wie GPS
         val isGps = loc.provider == LocationManager.GPS_PROVIDER || (loc.provider == "fused" && acc <= 30f)
+        if (loc.provider == LocationManager.GPS_PROVIDER) lastChipFix = now
         if (isGps) lastGpsFix = now else {
             lastOtherFix = now
             // Netz-Position nur nutzen, solange GPS nichts liefert
@@ -312,8 +350,8 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
                 if (gone * 1000 < PosFilter.MAX_DEAD_MS && obdSpeed() != null) "GPS-Signal schwach – Position aus Tacho geschätzt (seit $gone s) · $sats"
                 else "GPS-Signal verloren · $sats$hint"
             }
-            PosFilter.Source.NETWORK -> "Nur ungefährer Standort (Netz) ±${p.acc.roundToInt()} m · $sats"
-            PosFilter.Source.GPS -> "GPS ok ±${p.acc.roundToInt()} m · $satsUsed Satelliten"
+            PosFilter.Source.NETWORK -> (if (now - lastGmsFix < 5000) "Standort über Google-Dienste" else "Nur ungefährer Standort (Netz)") + " ±${p.acc.roundToInt()} m · $sats"
+            PosFilter.Source.GPS -> "GPS ok ±${p.acc.roundToInt()} m · " + (if (now - lastGmsFix < 5000 && now - lastChipFix > 5000) "über Google-Dienste" else "$satsUsed Satelliten")
         }
     }
 
@@ -375,7 +413,10 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
                 val fresh = f.exists() && now - f.lastModified() < MAX_AGE_MS
                 var text: String? = if (f.exists()) runCatching { f.readText() }.getOrNull() else null
                 if (!fresh && SystemClock.elapsedRealtime() - (failedAt[key] ?: -RETRY_MS) >= RETRY_MS) {
+                    val t0 = SystemClock.elapsedRealtime()
                     val dl = net.withLock { download(ty, tx) }
+                    val sec = (SystemClock.elapsedRealtime() - t0) / 1000.0
+                    _state.value = _state.value.copy(lastDownload = String.format(java.util.Locale.GERMANY, "%.1f s", sec) + if (dl == null) " (fehlgeschlagen)" else "")
                     if (dl != null) {
                         val tmp = File(dir, "${ty}_$tx.tmp")
                         tmp.writeText(dl)
