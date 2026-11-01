@@ -249,9 +249,43 @@ fun LauncherHome(
     }
 }
 
-/** Hintergrund: Spotlight von oben, leuchtender Horizont, Punkteboden in Perspektive */
+/** Lage des Horizonts im Hintergrundbild (Anteil der Bildhöhe) */
+private const val STAGE_HORIZON = 0.615f
+
+/**
+ * Hintergrund: Bild (Spotlight, leuchtender Horizont, Punkteboden), so skaliert, dass sein Horizont
+ * genau dort liegt, wo die Symbole stehen. Darüber ein leichtes Pulsieren des Lichts.
+ */
 @Composable
 private fun Stage(modifier: Modifier, horizonY: Float, glow: Float) {
+    val img = androidx.compose.ui.res.imageResource(de.jarvis.w204.R.drawable.mb_stage)
+    Canvas(modifier) {
+        val w = size.width; val h = size.height
+        val hy = h * horizonY
+        val iw = img.width.toFloat(); val ih = img.height.toFloat()
+        val s = maxOf(w / iw, hy / (STAGE_HORIZON * ih), (h - hy) / ((1f - STAGE_HORIZON) * ih))
+        val dw = iw * s; val dh = ih * s
+        val x0 = (w - dw) / 2f
+        val y0 = hy - STAGE_HORIZON * dh
+        drawRect(Mb.top)
+        drawImage(
+            img,
+            dstOffset = androidx.compose.ui.unit.IntOffset(x0.toInt(), y0.toInt()),
+            dstSize = androidx.compose.ui.unit.IntSize(dw.toInt() + 1, dh.toInt() + 1),
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+        )
+        // Licht am Horizont atmet leicht (und blendet beim Öffnen auf)
+        scale(1f, 0.25f, pivot = Offset(w * 0.5f, hy)) {
+            drawCircle(Brush.radialGradient(listOf(Color(0xFF3FE0FF).copy(alpha = 0.22f * glow), Color.Transparent), Offset(w * 0.5f, hy), w * 0.4f), w * 0.4f, Offset(w * 0.5f, hy))
+        }
+        if (glow < 0.6f) drawRect(Color.Black.copy(alpha = (0.6f - glow) * 0.8f))
+    }
+}
+
+/** frühere, gezeichnete Bühne (Reserve) */
+@Suppress("unused")
+@Composable
+private fun StageDrawn(modifier: Modifier, horizonY: Float, glow: Float) {
     Canvas(modifier) {
         val w = size.width; val h = size.height
         val hy = h * horizonY
@@ -384,7 +418,7 @@ private fun EntryColumn(e: Entry, s: LauncherState, a: LauncherActions, modifier
                 Canvas(Modifier.width(iconSize * 1.3f).height(iconSize * 0.5f).offset(y = iconSize * 0.2f)) {
                     drawOval(Brush.radialGradient(listOf(Color(0xFF9FD8FF).copy(alpha = 0.35f + 0.4f * press), Color.Transparent), center, size.width / 2f))
                 }
-                val custom = s.customIcons[e.id]
+                val custom = s.customIcons[e.id] ?: bundledIcon(e.id)
                 val m = Modifier.padding(bottom = iconSize * 0.04f).size(iconSize).graphicsLayer {
                     val sc = 1f - 0.06f * press
                     scaleX = sc; scaleY = sc
@@ -544,4 +578,23 @@ private fun AssignDialog(t: Tile, s: LauncherState, a: LauncherActions, onClose:
             }
         }
     }
+}
+
+/** mitgelieferte Symbole (eigene Bilder des Nutzers haben Vorrang) */
+@Composable
+private fun bundledIcon(id: String): ImageBitmap? {
+    val res = when (id) {
+        "navi" -> de.jarvis.w204.R.drawable.mb_navi
+        "medien" -> de.jarvis.w204.R.drawable.mb_medien
+        "telefon" -> de.jarvis.w204.R.drawable.mb_telefon
+        "komfort" -> de.jarvis.w204.R.drawable.mb_komfort
+        "fahrzeug" -> de.jarvis.w204.R.drawable.mb_fahrzeug
+        "video" -> de.jarvis.w204.R.drawable.mb_video
+        "apps" -> de.jarvis.w204.R.drawable.mb_apps
+        "carplay" -> de.jarvis.w204.R.drawable.mb_carplay
+        "info" -> de.jarvis.w204.R.drawable.mb_info
+        "radio" -> de.jarvis.w204.R.drawable.mb_radio
+        else -> return null
+    }
+    return androidx.compose.ui.res.imageResource(res)
 }
