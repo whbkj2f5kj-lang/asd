@@ -5,6 +5,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.sin
 import kotlin.math.roundToInt
 
 /*
@@ -338,5 +339,58 @@ object MapMatcher {
             }
         }
         return if (bestCost < 30) best else null
+    }
+
+    /**
+     * Auf der Straße [w] von (lat, lon) aus [meters] in Fahrtrichtung weitergehen.
+     * Ergebnis liegt auf der Straßenmitte (Richtung = Richtung der Straße dort).
+     * Am Ende der Straße geht es geradeaus weiter. null, wenn der Punkt nicht zur Straße passt.
+     */
+    fun advance(w: Way, lat: Double, lon: Double, heading: Float, meters: Double): Triple<Double, Double, Float>? {
+        val n = w.lat.size
+        if (n < 2) return null
+        val kx = 111_320.0 * cos(Math.toRadians(lat))
+        val ky = 110_540.0
+        fun x(i: Int) = (w.lon[i] - lon) * kx
+        fun y(i: Int) = (w.lat[i] - lat) * ky
+        var bi = -1; var bt = 0.0; var bd = Double.MAX_VALUE
+        for (i in 0 until n - 1) {
+            val ax = x(i); val ay = y(i)
+            val dx = x(i + 1) - ax; val dy = y(i + 1) - ay
+            val len2 = dx * dx + dy * dy
+            if (len2 < 0.01) continue
+            val t = (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+            val d = hypot(ax + t * dx, ay + t * dy)
+            if (d < bd) { bd = d; bi = i; bt = t }
+        }
+        if (bi < 0 || bd > 25.0) return null
+        val segB = ((Math.toDegrees(atan2(x(bi + 1) - x(bi), y(bi + 1) - y(bi))) + 360) % 360).toFloat()
+        val diff = abs(((heading - segB + 540f) % 360f) - 180f)
+        if (diff in 55f..125f) return null          // quer zur Straße -> passt nicht
+        val forward = diff < 90f
+        var cx = x(bi) + bt * (x(bi + 1) - x(bi))
+        var cy = y(bi) + bt * (y(bi + 1) - y(bi))
+        var idx = if (forward) bi + 1 else bi
+        var rem = meters
+        var bearing = if (forward) segB else (segB + 180f) % 360f
+        while (rem > 0) {
+            if (idx < 0 || idx >= n) {
+                // Straße zu Ende: geradeaus weiter
+                val r = Math.toRadians(bearing.toDouble())
+                cx += rem * sin(r); cy += rem * cos(r)
+                break
+            }
+            val tx = x(idx); val ty = y(idx)
+            val sl = hypot(tx - cx, ty - cy)
+            if (sl > 0.01) bearing = ((Math.toDegrees(atan2(tx - cx, ty - cy)) + 360) % 360).toFloat()
+            if (rem <= sl) {
+                cx += (tx - cx) * rem / sl; cy += (ty - cy) * rem / sl
+                break
+            }
+            rem -= sl
+            cx = tx; cy = ty
+            idx += if (forward) 1 else -1
+        }
+        return Triple(lat + cy / ky, lon + cx / kx, bearing)
     }
 }

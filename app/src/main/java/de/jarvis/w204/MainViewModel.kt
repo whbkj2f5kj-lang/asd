@@ -405,6 +405,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val hist = ArrayDeque<Pair<Long, Int>>()
             var lastEvent = 0L
             obd.vehicle.collect { v ->
+                map.setVehicleSpeed(v.speed)
                 val sp = v.speed ?: return@collect
                 val now = SystemClock.elapsedRealtime()
                 hist.addLast(now to sp)

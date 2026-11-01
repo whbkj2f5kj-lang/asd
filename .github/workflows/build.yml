@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' --tests 'de.jarvis.w204.DiagTest' --tests 'de.jarvis.w204.DtcTest' --tests 'de.jarvis.w204.TpmsTest' --tests 'de.jarvis.w204.SignTest' --tests 'de.jarvis.w204.OsmTest' --tests 'de.jarvis.w204.SignNetTest' --tests 'de.jarvis.w204.LaneTest' --tests 'de.jarvis.w204.PerfTest' --tests 'de.jarvis.w204.PlausibilityTest' --tests 'de.jarvis.w204.LauncherTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
+          gradle testDebugUnitTest --tests 'de.jarvis.w204.ObdParserTest' --tests 'de.jarvis.w204.VisionTest' --tests 'de.jarvis.w204.DiagTest' --tests 'de.jarvis.w204.DtcTest' --tests 'de.jarvis.w204.TpmsTest' --tests 'de.jarvis.w204.SignTest' --tests 'de.jarvis.w204.OsmTest' --tests 'de.jarvis.w204.SignNetTest' --tests 'de.jarvis.w204.LaneTest' --tests 'de.jarvis.w204.PerfTest' --tests 'de.jarvis.w204.PlausibilityTest' --tests 'de.jarvis.w204.LauncherTest' --tests 'de.jarvis.w204.GpsTest' assembleDebug --console=plain -Pabis=arm64-v8a,armeabi-v7a 2>&1 | tee build.log
 
       - name: Fehler zusammenfassen
         if: failure()

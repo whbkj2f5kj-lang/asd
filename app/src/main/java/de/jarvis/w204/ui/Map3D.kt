@@ -129,6 +129,14 @@ fun MapView3D(vm: MainViewModel, active: Boolean, modifier: Modifier = Modifier,
         // Bedienelemente nur im mittleren Bereich, die Karte selbst reicht bis hinter die Instrumente
         Box(Modifier.fillMaxSize().padding(horizontal = LocalCenterInset.current)) {
 
+        // GPS-Zustand, wenn nicht einwandfrei (letzte Position / aus Tacho geschätzt / Netz)
+        if (p != null && !ms.gps.startsWith("GPS ok")) {
+            Text(
+                ms.gps.substringBefore(" · "), color = J.warn, fontSize = 12.sp, maxLines = 1,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
+                    .clip(RoundedCornerShape(50)).background(Color(0xCC0B1424)).padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
         // Straßenname + Limit
         Column(Modifier.align(Alignment.TopStart).padding(14.dp)) {
             SpeedLimitSign(limit, false, Modifier.size(54.dp))

@@ -81,11 +81,34 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
     @Volatile private var lastFix = 0L
     @Volatile private var center = 0 to 0
 
-    private var shown: Match? = null
+    @Volatile private var shown: Match? = null
     private var candidate: Match? = null
     private var candidateCount = 0
 
     fun permitted() = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    // ---- Positionsfilter + Koppelnavigation
+    private val filter = PosFilter()
+    private val filterLock = Any()
+    @Volatile private var obdSpeedMs: Float? = null
+    @Volatile private var obdSpeedAt = 0L
+    private val saved = ctx.getSharedPreferences("lastpos", Context.MODE_PRIVATE)
+    private var savedAt = 0L
+    @Volatile private var lastMatchAt = 0L
+
+    /** Tempo vom Tacho (OBD): rechnet zwischen den GPS-Punkten und bei Ausfall weiter */
+    fun setVehicleSpeed(kmh: Int?) {
+        obdSpeedMs = kmh?.let { it / 3.6f }
+        obdSpeedAt = SystemClock.elapsedRealtime()
+    }
+
+    private fun obdSpeed(): Float? = obdSpeedMs.takeIf { SystemClock.elapsedRealtime() - obdSpeedAt < 3000 }
+
+    /** Weiterrechnen entlang der zugeordneten Straße */
+    private val follower = PosFilter.Follower { lat, lon, h, m ->
+        val sh = shown ?: return@Follower null
+        MapMatcher.advance(sh.way, lat, lon, h, m)
+    }
 
     fun start() {
         if (listener != null) return
@@ -101,10 +124,7 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
             override fun onProviderEnabled(provider: String) { if (provider == LocationManager.GPS_PROVIDER) gpsOff = false }
             override fun onProviderDisabled(provider: String) {
-                if (provider == LocationManager.GPS_PROVIDER) {
-                    gpsOff = true
-                    _state.value = _state.value.copy(hasFix = false, gps = "Standort ist am Radio ausgeschaltet")
-                }
+                if (provider == LocationManager.GPS_PROVIDER) gpsOff = true
             }
         }
         // GPS + (falls vorhanden) Netz/Fused als Rückfallebene
@@ -112,7 +132,7 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused")) {
             if (p !in providers) continue
             try {
-                lm.requestLocationUpdates(p, 1000L, 0f, l, Looper.getMainLooper())
+                lm.requestLocationUpdates(p, if (p == LocationManager.GPS_PROVIDER) 0L else 1000L, 0f, l, Looper.getMainLooper())
                 any = true
             } catch (t: Throwable) {
                 Log.w(TAG, "Standortquelle $p nicht nutzbar", t)
@@ -144,35 +164,31 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         runCatching { lm.registerGnssStatusCallback(cb, android.os.Handler(Looper.getMainLooper())) }
         gnssCb = cb
 
-        // Letzte bekannte Position: Karte schon vorladen, bevor das GPS steht
-        providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
-            .maxByOrNull { it.time }
-            ?.let { last -> scope.launch(Dispatchers.Default) { prefetch(last.latitude, last.longitude) } }
+        // Startposition: zuletzt gespeicherte (Auto steht meist noch da, wo es abgestellt wurde)
+        // oder die letzte bekannte des Systems – je nachdem, was neuer ist. Karte ist dann sofort da.
+        val last = providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+        val sLat = saved.getString("lat", null)?.toDoubleOrNull()
+        val sLon = saved.getString("lon", null)?.toDoubleOrNull()
+        val sTime = saved.getLong("time", 0L)
+        val sHead = saved.getFloat("head", -1f).takeIf { it >= 0f }
+        val seed = when {
+            last != null && (sLat == null || last.time > sTime) -> Triple(last.latitude, last.longitude, null as Float?)
+            sLat != null && sLon != null -> Triple(sLat, sLon, sHead)
+            else -> null
+        }
+        seed?.let { (la, lo, h) ->
+            synchronized(filterLock) { filter.seed(la, lo, h, SystemClock.elapsedRealtime()) }
+            scope.launch(Dispatchers.Default) { prefetch(la, lo) }
+        }
 
         _state.value = State(running = true, gps = if (gpsOff) "Standort ist am Radio ausgeschaltet" else "Warte auf GPS-Signal …")
+        // 5× pro Sekunde: Position weiterrechnen (Tacho) und veröffentlichen
         watchdog = scope.launch {
+            var tick = 0
             while (isActive) {
-                delay(2000)
-                val s = _state.value
-                val now = SystemClock.elapsedRealtime()
-                val gpsFresh = now - lastGpsFix < 10_000
-                if (gpsOff) {
-                    _state.value = s.copy(hasFix = false, gps = "Standort ist am Radio ausgeschaltet – in den Android-Einstellungen einschalten")
-                } else if (!gpsFresh) {
-                    val sats = "Satelliten: $satsVisible sichtbar, $satsGood mit gutem Signal, $satsUsed genutzt"
-                    val wait = (now - startedAt) / 1000
-                    val head = when {
-                        lastGpsFix > 0 -> "GPS-Signal verloren"
-                        now - lastOtherFix < 10_000 -> "Nur ungefährer Standort (Netz)"
-                        else -> "Warte auf GPS-Signal (${wait / 60}:${"%02d".format(wait % 60)})"
-                    }
-                    val hint = when {
-                        wait > 120 && satsVisible == 0 -> " – keine Satelliten: GPS-Antenne am Radio prüfen"
-                        wait > 120 && satsGood < 4 -> " – Signal zu schwach: Antenne frei unter die Scheibe/aufs Dach"
-                        else -> ""
-                    }
-                    _state.value = s.copy(hasFix = now - lastOtherFix < 10_000 && s.hasFix, gps = "$head · $sats$hint")
-                }
+                delay(200)
+                tick++
+                runCatching { tickPosition(tick % 10 == 0) }.onFailure { Log.w(TAG, "Positionstakt", it) }
             }
         }
     }
@@ -193,6 +209,7 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         gnssCb = null
         watchdog?.cancel()
         watchdog = null
+        synchronized(filterLock) { filter.pose?.let { savePos(it, force = true) } }
         shown = null
         candidate = null
         _state.value = State()
@@ -201,21 +218,102 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
     private fun onLocation(loc: Location) {
         val now = SystemClock.elapsedRealtime()
         lastFix = now
-        val isGps = loc.provider == LocationManager.GPS_PROVIDER
+        val acc = if (loc.hasAccuracy()) loc.accuracy else 50f
+        // Fused (Google) ist meist GPS-gestützt: genau genug zählt wie GPS
+        val isGps = loc.provider == LocationManager.GPS_PROVIDER || (loc.provider == "fused" && acc <= 30f)
         if (isGps) lastGpsFix = now else {
             lastOtherFix = now
-            // Netz-/Fused-Position nur nutzen, solange GPS nichts liefert
+            // Netz-Position nur nutzen, solange GPS nichts liefert
             if (now - lastGpsFix < 5000) return
+            if (acc > 2000f) return
         }
+        // Zeitpunkt der Messung (das Radio liefert sie oft verzögert aus)
+        val at = (loc.elapsedRealtimeNanos / 1_000_000L).takeIf { it in (now - 5000)..now } ?: now
+        val spd = if (loc.hasSpeed()) loc.speed else null
+        val brg = if (loc.hasBearing()) loc.bearing else null
+        val ok = synchronized(filterLock) {
+            filter.update(loc.latitude, loc.longitude, acc, brg, spd, isGps, at, obdSpeed(), follower)
+        }
+        if (!ok) return
+        val p = synchronized(filterLock) { filter.pose } ?: return
+        if (isGps && acc <= 50f) savePos(p, force = false)
         if (!busy.compareAndSet(false, true)) return
         scope.launch(Dispatchers.Default) {
             try {
-                process(loc)
+                rematch(p)
             } catch (t: Throwable) {
                 Log.w(TAG, "Kartenabgleich fehlgeschlagen", t)
             } finally {
                 busy.set(false)
             }
+        }
+    }
+
+    private fun savePos(p: PosFilter.Pose, force: Boolean) {
+        if (p.source == PosFilter.Source.SAVED) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - savedAt < 20_000) return
+        savedAt = now
+        saved.edit()
+            .putString("lat", p.lat.toString())
+            .putString("lon", p.lon.toString())
+            .putFloat("head", p.heading ?: -1f)
+            .putLong("time", System.currentTimeMillis())
+            .apply()
+    }
+
+    /** Takt: weiterrechnen, veröffentlichen, bei Koppelnavigation regelmäßig neu zuordnen */
+    private fun tickPosition(slow: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        val p = synchronized(filterLock) { filter.predict(now, obdSpeed(), follower) }
+        val s = _state.value
+        val text = statusText(p, now)
+        if (p == null) {
+            if (slow) _state.value = s.copy(hasFix = false, gps = text)
+            return
+        }
+        val dead = p.source == PosFilter.Source.DEAD_RECKONING
+        val sinceFix = now - p.lastFixAt
+        // Tempolimit der Straße bleibt bei kurzem Ausfall (Tunnel) gültig, solange wir der Straße folgen
+        val fix = when (p.source) {
+            PosFilter.Source.SAVED -> false
+            PosFilter.Source.DEAD_RECKONING -> s.hasFix && sinceFix < 60_000 && shown != null
+            else -> s.hasFix
+        }
+        _state.value = s.copy(
+            lat = p.lat, lon = p.lon, acc = p.acc.roundToInt(),
+            bearing = p.heading ?: s.bearing,
+            speedMs = p.speedMs,
+            fixAt = now,
+            hasFix = fix,
+            gps = if (slow || dead || p.source == PosFilter.Source.SAVED || s.gps.startsWith("Warte")) text else s.gps,
+        )
+        if (dead && now - lastMatchAt > 1500 && busy.compareAndSet(false, true)) {
+            scope.launch(Dispatchers.Default) {
+                try { rematch(p) } catch (t: Throwable) { Log.w(TAG, "Kartenabgleich", t) } finally { busy.set(false) }
+            }
+        }
+    }
+
+    private fun statusText(p: PosFilter.Pose?, now: Long): String {
+        if (gpsOff) return "Standort ist am Radio ausgeschaltet – in den Android-Einstellungen einschalten"
+        val sats = "Satelliten: $satsVisible sichtbar, $satsGood mit gutem Signal, $satsUsed genutzt"
+        val wait = (now - startedAt) / 1000
+        val hint = when {
+            wait > 120 && satsVisible == 0 -> " – keine Satelliten: GPS-Antenne am Radio prüfen"
+            wait > 120 && satsGood < 4 -> " – Signal zu schwach: Antenne frei unter die Scheibe/aufs Dach"
+            else -> ""
+        }
+        return when (p?.source) {
+            null -> "Warte auf GPS-Signal (${wait / 60}:${"%02d".format(wait % 60)}) · $sats$hint"
+            PosFilter.Source.SAVED -> "Letzte bekannte Position – warte auf GPS (${wait / 60}:${"%02d".format(wait % 60)}) · $sats$hint"
+            PosFilter.Source.DEAD_RECKONING -> {
+                val gone = (now - p.lastFixAt) / 1000
+                if (gone * 1000 < PosFilter.MAX_DEAD_MS && obdSpeed() != null) "GPS-Signal schwach – Position aus Tacho geschätzt (seit $gone s) · $sats"
+                else "GPS-Signal verloren · $sats$hint"
+            }
+            PosFilter.Source.NETWORK -> "Nur ungefährer Standort (Netz) ±${p.acc.roundToInt()} m · $sats"
+            PosFilter.Source.GPS -> "GPS ok ±${p.acc.roundToInt()} m · $satsUsed Satelliten"
         }
     }
 
@@ -227,27 +325,22 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         for (dy in -1..1) for (dx in -1..1) if (dy != 0 || dx != 0) ensure(ty + dy, tx + dx)
     }
 
-    private fun process(loc: Location) {
-        val acc = if (loc.hasAccuracy()) loc.accuracy.roundToInt() else null
-        val isGps = loc.provider == LocationManager.GPS_PROVIDER
-        val gpsText = (if (isGps) "GPS ok" else "Standort (Netz)") + (acc?.let { " ±$it m" } ?: "") +
-            (if (isGps) " · $satsUsed Satelliten" else "")
-        if (acc != null && acc < 1000) prefetch(loc.latitude, loc.longitude)
+    /** Straße + Tempolimit zur (gefilterten) Position bestimmen */
+    private fun rematch(p: PosFilter.Pose) {
+        lastMatchAt = SystemClock.elapsedRealtime()
+        val acc = p.acc.roundToInt()
+        if (acc < 1000) prefetch(p.lat, p.lon)
         // Straßen zuordnen nur bei ausreichender Genauigkeit
-        if (acc != null && acc > (if (isGps) 40 else 25)) {
-            _state.value = _state.value.copy(hasFix = false, gps = "$gpsText – zu ungenau für die Straßenzuordnung")
+        if (acc > 45 || p.source == PosFilter.Source.SAVED) {
+            if (p.source != PosFilter.Source.DEAD_RECKONING) _state.value = _state.value.copy(hasFix = false)
             return
         }
-        val (ty, tx) = Osm.tileOf(loc.latitude, loc.longitude)
-        center = ty to tx
-        ensure(ty, tx)
-        for (dy in -1..1) for (dx in -1..1) if (dy != 0 || dx != 0) ensure(ty + dy, tx + dx)
-
+        val (ty, tx) = Osm.tileOf(p.lat, p.lon)
         val ways = HashMap<Long, Way>()
         for (dy in -1..1) for (dx in -1..1) tiles[Osm.tileKey(ty + dy, tx + dx)]?.forEach { ways[it.id] = it }
 
-        val bearing = if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 2.5f) loc.bearing else null
-        var m = MapMatcher.match(ways.values, loc.latitude, loc.longitude, bearing, shown?.way?.id)
+        val bearing = p.heading?.takeIf { p.speedMs > 2.5f }
+        var m = MapMatcher.match(ways.values, p.lat, p.lon, bearing, shown?.way?.id)
         val prev = shown
         if (m != null && bearing == null && prev != null && prev.way.id == m.way.id) m = Match(m.way, prev.forward, m.dist)
 
@@ -262,14 +355,7 @@ class MapLimits(context: Context, private val scope: CoroutineScope) {
         val cur = shown
         val tileLoaded = tiles.containsKey(Osm.tileKey(ty, tx))
         _state.value = _state.value.copy(
-            lat = loc.latitude,
-            lon = loc.longitude,
-            acc = acc,
-            bearing = if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1.5f) loc.bearing else _state.value.bearing,
-            speedMs = if (loc.hasSpeed()) loc.speed else null,
-            fixAt = SystemClock.elapsedRealtime(),
             hasFix = true,
-            gps = gpsText,
             road = cur?.way?.label ?: cur?.let { roadType(it.way.highway) },
             roadKey = cur?.way?.roadKey,
             highway = cur?.way?.highway,
