@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
@@ -730,6 +731,6 @@ internal fun HomeButton(onClick: () -> Unit) {
         Modifier.size(34.dp).clip(CircleShape).background(J.panel2).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Home, contentDescription = "Startbildschirm", tint = J.dim, modifier = Modifier.size(20.dp))
+        androidx.compose.material3.Icon(Icons.Filled.Home, contentDescription = "Startbildschirm", tint = J.dim, modifier = Modifier.size(20.dp))
     }
 }

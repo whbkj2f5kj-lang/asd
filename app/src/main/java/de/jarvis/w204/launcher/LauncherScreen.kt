@@ -153,7 +153,8 @@ fun LauncherHome(
                 detectVerticalDragGestures(onDragStart = { dy = 0f }, onDragEnd = { if (dy < -80f) onDrawer(true) }) { _, d -> dy += d }
             }
     ) {
-        val tileW = (maxWidth / 4.6f).coerceIn(150.dp, 300.dp)
+        val fullW = maxWidth
+        val tileW = (fullW / 4.6f).coerceIn(150.dp, 300.dp)
         Column(Modifier.fillMaxSize()) {
             HomeTopBar(s, a)
             val list = rememberLazyListState()
@@ -169,7 +170,7 @@ fun LauncherHome(
             LazyRow(
                 state = list,
                 flingBehavior = snap,
-                contentPadding = PaddingValues(horizontal = (maxWidth - tileW) / 2),
+                contentPadding = PaddingValues(horizontal = (fullW - tileW) / 2),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
