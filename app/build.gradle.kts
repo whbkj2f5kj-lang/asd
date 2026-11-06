@@ -11,10 +11,13 @@ android {
 
     defaultConfig {
         applicationId = "de.jarvis.w204"
-        minSdk = 29          // Android 10 (Head-Unit)
-        targetSdk = 34
-        versionCode = 52
-        versionName = "6.2"
+        // Android 10 auf dem Radio; minSdk muss ≤ targetSdk sein
+        minSdk = 26
+        // Absichtlich 27: Android 10 (vor Sicherheitspatch 03/2020) verweigert Apps mit targetSdk ≥ 28
+        // den USB-Zugriff auf UVC-Kameras ("Unable to grant USB permission"). App wird nicht über Play verteilt.
+        targetSdk = 27
+        versionCode = 53
+        versionName = "6.3"
         // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
         val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         ndk { abiFilters += abis }
