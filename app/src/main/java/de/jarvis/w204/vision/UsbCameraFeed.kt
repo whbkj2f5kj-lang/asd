@@ -70,13 +70,28 @@ fun UsbDevice.label(): String {
     return "$name (%04X:%04X)".format(vendorId, productId)
 }
 
-/** Größte Auflösung bis 1280×720 – mehr bringt der Erkennung nichts und kostet USB-Bandbreite. */
-private fun pickSize(sizes: List<Size>?): Size? {
-    if (sizes.isNullOrEmpty()) return null
-    val fitting = sizes.filter { it.width <= 1280 && it.height <= 720 }
-    val pool = fitting.ifEmpty { sizes }
-    return pool.maxByOrNull { it.width * it.height - abs(it.width * 9 - it.height * 16) }
+/**
+ * Reihenfolge der Versuche: MJPEG zuerst (komprimiert, passt sicher durch USB 2.0), bis 1280×720,
+ * 16:9 bevorzugt, mindestens 15 B/s. Danach unkomprimiert, zuletzt alles andere.
+ * Viele neue Kameras (z. B. IMX662) liefern unkomprimiert nur sehr kleine Bilder oder 5 B/s –
+ * oder melden H.264/H.265, das der Treiber nicht entpackt.
+ */
+internal fun sizeCandidates(sizes: List<Size>?): List<Size> {
+    if (sizes.isNullOrEmpty()) return emptyList()
+    val known = sizes.filter { it.type == UVCCamera.UVC_VS_FRAME_MJPEG || it.type == UVCCamera.UVC_VS_FRAME_UNCOMPRESSED }
+    fun score(s: Size): Int {
+        var v = 0
+        if (s.type == UVCCamera.UVC_VS_FRAME_MJPEG) v += 4_000_000
+        if (s.width <= 1280 && s.height <= 720) v += 2_000_000
+        if (s.fps == 0 || s.fps >= 15) v += 1_000_000
+        if (abs(s.width * 9 - s.height * 16) < s.width / 20) v += 500_000
+        v += minOf(s.width * s.height, 1280 * 720) / 2
+        return v
+    }
+    return known.sortedByDescending(::score).distinctBy { Triple(it.type, it.width, it.height) }.take(6)
 }
+
+private fun Size.describe() = "${if (type == UVCCamera.UVC_VS_FRAME_MJPEG) "MJPEG" else "YUV"} ${width}×$height" + (if (fps > 0) " @$fps" else "")
 
 /**
  * Kamerabild direkt über USB (eigener UVC-Treiber), für Radios, die USB-Kameras
@@ -95,6 +110,19 @@ fun UsbCameraFeed(
     DisposableEffect(Unit) {
         val helper: ICameraHelper = CameraHelper()
         val opened = java.util.concurrent.atomic.AtomicBoolean(false)
+        var candidates: List<Size> = emptyList()
+        var attempt = 0
+        var formats = ""
+        fun tryOpen() {
+            val c = candidates.getOrNull(attempt)
+            if (c != null) {
+                onStatus("Öffne USB-Kamera: ${c.describe()} (Versuch ${attempt + 1}/${candidates.size})")
+                runCatching { helper.openCamera(c) }.onFailure { onStatus("USB-Kamera: ${c.describe()} geht nicht – ${it.message}") }
+            } else {
+                onStatus("Öffne USB-Kamera mit Standardeinstellung …")
+                runCatching { helper.openCamera() }
+            }
+        }
         var texture: SurfaceTexture? = textureView.surfaceTexture
 
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -122,8 +150,12 @@ fun UsbCameraFeed(
 
             override fun onDeviceOpen(device: UsbDevice, isFirstOpen: Boolean) {
                 CrashGuard.enter("usb_camera")
-                val size = pickSize(helper.supportedSizeList)
-                if (size != null) helper.openCamera(size) else helper.openCamera()
+                val all = runCatching { helper.supportedSizeList }.getOrNull()
+                formats = all.orEmpty().joinToString(", ") { it.describe() + "/t${it.type}" }.take(400)
+                candidates = sizeCandidates(all)
+                attempt = 0
+                if (all.isNullOrEmpty()) onStatus("USB-Kamera meldet keine Formate – versuche Standard …")
+                tryOpen()
             }
 
             override fun onCameraOpen(device: UsbDevice) {
@@ -156,8 +188,15 @@ fun UsbCameraFeed(
             }
 
             override fun onError(device: UsbDevice?, e: CameraException?) {
+                // nächstes Format probieren, bevor wir aufgeben
+                if (!opened.get() && attempt < candidates.size) {
+                    attempt++
+                    runCatching { helper.closeCamera() }
+                    tryOpen()
+                    return
+                }
                 CrashGuard.leave("usb_camera")
-                onStatus("USB-Kamera-Fehler (${e?.code ?: "?"}).\nKamera ab- und wieder anstecken.")
+                onStatus("USB-Kamera-Fehler (${e?.code ?: "?"}: ${e?.message ?: ""}).\nFormate: ${formats.ifBlank { "keine gemeldet" }}\nKamera ab- und wieder anstecken.")
             }
         })
 
