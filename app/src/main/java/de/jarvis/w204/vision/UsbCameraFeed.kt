@@ -35,6 +35,21 @@ fun UsbDevice.isUvcCamera(): Boolean {
     return false
 }
 
+/** Hat die Kamera ein eingebautes Mikrofon? Dann verlangt Android für den USB-Zugriff die Mikrofon-Berechtigung. */
+fun UsbDevice.hasAudio(): Boolean = (0 until interfaceCount).any { getInterface(it).interfaceClass == UsbConstants.USB_CLASS_AUDIO }
+
+private fun granted(c: Context, p: String) =
+    androidx.core.content.ContextCompat.checkSelfPermission(c, p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+/** Warum Android den Zugriff ohne Nachfrage verweigern würde (oder null) */
+fun usbCameraBlocker(c: Context, d: UsbDevice): String? = when {
+    !granted(c, android.Manifest.permission.CAMERA) ->
+        "Android verlangt für USB-Kameras die Kamera-Berechtigung.\nEinstellungen → Apps → Dashboard W204 → Berechtigungen → Kamera erlauben."
+    d.hasAudio() && !granted(c, android.Manifest.permission.RECORD_AUDIO) ->
+        "Diese Kamera hat ein eingebautes Mikrofon – dafür verlangt Android die Mikrofon-Berechtigung, sonst wird der Zugriff ohne Nachfrage verweigert.\nEinstellungen → Apps → Dashboard W204 → Berechtigungen → Mikrofon erlauben, dann Kamera neu anstecken."
+    else -> null
+}
+
 fun usbCameras(context: Context): List<UsbDevice> = try {
     context.getSystemService(UsbManager::class.java)?.deviceList?.values.orEmpty().filter { it.isUvcCamera() }
 } catch (t: Throwable) {
@@ -143,6 +158,8 @@ fun UsbCameraFeed(
         helper.setStateCallback(object : ICameraHelper.StateCallback {
             override fun onAttach(device: UsbDevice) {
                 if (device.isUvcCamera()) {
+                    val block = usbCameraBlocker(context, device)
+                    if (block != null) { onStatus(block); return }
                     onStatus("USB-Kamera gefunden – Zugriff erlauben")
                     helper.selectDevice(device)
                 }
@@ -184,7 +201,8 @@ fun UsbCameraFeed(
 
             override fun onCancel(device: UsbDevice) {
                 CrashGuard.leave("usb_camera")
-                onStatus("USB-Zugriff nicht erlaubt.\nKamera kurz ab- und wieder anstecken und „Erlauben“ wählen.")
+                onStatus(device.let { usbCameraBlocker(context, it) }
+                    ?: "USB-Zugriff nicht erlaubt.\nKamera kurz ab- und wieder anstecken und „Erlauben“ wählen.")
             }
 
             override fun onError(device: UsbDevice?, e: CameraException?) {
