@@ -15,7 +15,9 @@ android {
         minSdk = 26
         // Absichtlich 27: Android 10 (vor Sicherheitspatch 03/2020) verweigert Apps mit targetSdk ≥ 28
         // den USB-Zugriff auf UVC-Kameras ("Unable to grant USB permission"). App wird nicht über Play verteilt.
-        targetSdk = 27
+        // Nur für die Vorschaubilder (Paparazzi) 34 – dessen Zeichen-Ersatz kommt mit 27 nicht klar
+        val previewRun = gradle.startParameter.taskNames.any { it.contains("Paparazzi", ignoreCase = true) }
+        targetSdk = if (previewRun) 34 else 27
         versionCode = 54
         versionName = "6.4"
         // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
