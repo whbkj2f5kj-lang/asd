@@ -25,6 +25,8 @@ def patch(path, edits):
 
 patch("CMakeLists.txt", [
     (r"COMPONENTS WebEngineQuick WebSockets Network\)", "COMPONENTS WebSockets Network Svg)", 1),
+    (r"COMPONENTS Core Gui Qml Quick DBus\)", "COMPONENTS Core Gui Qml Quick)", 1),
+    (r"Qt6::Quick Qt6::DBus Qt6::Location", "Qt6::Quick Qt6::Location", 1),
     (r"^find_package\(X11 REQUIRED\)\n", "", 1),
     (r"^find_package\(PkgConfig REQUIRED\)\n", "", 1),
     (r"^find_package\(Qt6 OPTIONAL_COMPONENTS WaylandCompositor QUIET\)\n", "", 2),
@@ -56,6 +58,15 @@ qt_add_resources(VoltaOS "volta_port_stubs"
     PREFIX "/qt/qml"
     BASE ${VOLTA_PORT_DIR}/qmlstubs
     FILES ${VOLTA_PORT_STUBS})
+if(ANDROID)
+    # Qt D-Bus fehlt in Qt fuer Android
+    target_sources(VoltaOS PRIVATE ${VOLTA_PORT_DIR}/shim-dbus/volta_dbusshim.h)
+    target_include_directories(VoltaOS BEFORE PRIVATE
+        ${VOLTA_PORT_DIR}/shim-dbus ${VOLTA_PORT_DIR}/shim-dbus/QtDBus)
+else()
+    find_package(Qt6 REQUIRED COMPONENTS DBus)
+    target_link_libraries(VoltaOS PRIVATE Qt6::DBus)
+endif()
 if(ANDROID)
     set_target_properties(VoltaOS PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR ${VOLTA_PORT_DIR}/android
