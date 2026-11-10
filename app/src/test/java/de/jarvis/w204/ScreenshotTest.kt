@@ -211,6 +211,27 @@ class ScreenshotTest {
         return ways to houses
     }
 
+    @Test fun volta() {
+        val (ways, houses) = city()
+        val apps = listOf("Bluetooth", "ZLINK", "Spotify", "Radio", "YouTube", "Google Maps", "Car Settings")
+            .map { de.jarvis.w204.volta.DockApp("p." + it.lowercase().replace(" ", ""), "c", it) }
+        val slots = de.jarvis.w204.volta.DockSlot.entries.associateWith { de.jarvis.w204.volta.AppDock.guess(it, apps) }
+        paparazzi.snapshot {
+            JarvisTheme {
+                de.jarvis.w204.volta.VoltaCockpit(
+                    de.jarvis.w204.volta.VoltaState(
+                        v = car, limit = 100, over = false, obdLive = true, clock = "17:58", driveMode = "Komfort", faults = 0,
+                        track = de.jarvis.w204.volta.Track("Save Your Tears", "The Weeknd", null, true, 215_000, 80_000, 0L, "Spotify"),
+                        mediaAllowed = true, slots = slots, apps = apps, carVersion = 0, hasCar = false,
+                    ),
+                    de.jarvis.w204.volta.VoltaActions(),
+                ) {
+                    de.jarvis.w204.ui.Map3DCanvas(ways, houses, de.jarvis.w204.ui.MapPose(51.48 - 300 / 110540.0, 7.21, 0f), "Nord 0", Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+
     @Test fun map3d() {
         val (ways, houses) = city()
         paparazzi.snapshot {

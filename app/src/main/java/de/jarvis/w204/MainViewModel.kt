@@ -27,6 +27,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _settings = MutableStateFlow(prefs.load())
     val settings: StateFlow<Settings> = _settings
 
+    // ---- Volta-Darstellung
+    val nowPlaying = de.jarvis.w204.volta.NowPlaying(app)
+    val dock = de.jarvis.w204.volta.AppDock(app, viewModelScope)
+    /** zählt hoch, wenn ein neues 3D-Modell geladen wurde */
+    val carVersion = MutableStateFlow(0)
+
     val obd = ObdManager(app, viewModelScope)
     val scanner = de.jarvis.w204.obd.EcuScanner(app, obd, viewModelScope)
     val tpms = de.jarvis.w204.tpms.TpmsManager(app, viewModelScope)
@@ -280,6 +286,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if ("camera" in st || ("frame" in st && !visionStage) || (st.isEmpty() && "androidx.camera" in t)) {
                 s = s.copy(cameraEnabled = false); off += "Kamera"
+            }
+            if ("car3d" in st || "filament" in t || "gltfio" in t) {
+                de.jarvis.w204.volta.CarModel.remove(getApplication())
+                off += "3D-Modell (entfernt – anderes Modell laden)"
             }
             if (s != _settings.value) {
                 _settings.value = s

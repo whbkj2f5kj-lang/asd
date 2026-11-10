@@ -16,8 +16,8 @@ android {
         // Absichtlich 27: Android 10 (vor Sicherheitspatch 03/2020) verweigert Apps mit targetSdk ≥ 28
         // den USB-Zugriff auf UVC-Kameras ("Unable to grant USB permission"). App wird nicht über Play verteilt.
         targetSdk = 27
-        versionCode = 53
-        versionName = "6.3"
+        versionCode = 54
+        versionName = "6.4"
         // Standard (Android Studio): alle Prozessoren. Die Radio-APK baut GitHub mit -Pabis=arm64-v8a,armeabi-v7a
         val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         ndk { abiFilters += abis }
@@ -58,6 +58,10 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
+    // 3D-Auto (glTF) für die Volta-Darstellung
+    implementation("com.google.android.filament:filament-android:1.51.0")
+    implementation("com.google.android.filament:gltfio-android:1.51.0")
+    implementation("com.google.android.filament:filament-utils-android:1.51.0")
     // Standort wie Google Maps & Co. (GPS + WLAN + Mobilfunk gemischt) – falls Google-Dienste auf dem Radio sind
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.compose.foundation:foundation")

@@ -18,7 +18,7 @@ data class Settings(
     val cameraEnabled: Boolean = true,
     /** 0 = automatisch, 1 = Android-Kamera, 2 = USB direkt */
     val cameraSource: Int = 0,
-    /** 0 = Modern (Pfeil-Instrumente), 1 = Klassisch (Rundinstrumente) */
+    /** 0 = Modern (Pfeil-Instrumente), 1 = Klassisch (Rundinstrumente), 2 = Volta (3D-Auto, Karte, Musik) */
     val layout: Int = 0,
     /** Farbwelt: 0 Kupfer, 1 Eisblau, 2 Sport-Rot, 3 Amber */
     val palette: Int = 0,

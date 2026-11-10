@@ -186,6 +186,60 @@ fun DashboardApp(vm: MainViewModel) {
                     )
                 }
             }
+        } else if (settings.layout == 2) {
+            val track by vm.nowPlaying.track.collectAsStateWithLifecycle()
+            val allowed by vm.nowPlaying.allowed.collectAsStateWithLifecycle()
+            val slots by vm.dock.slots.collectAsStateWithLifecycle()
+            val apps by vm.dock.apps.collectAsStateWithLifecycle()
+            val carVer by vm.carVersion.collectAsStateWithLifecycle()
+            val hasCar = remember(carVer) { de.jarvis.w204.volta.CarModel.exists(context) }
+            LaunchedEffect(Unit) { vm.nowPlaying.refresh(); vm.dock.refresh() }
+            val toast = { m: String -> android.widget.Toast.makeText(context, m, android.widget.Toast.LENGTH_SHORT).show() }
+            de.jarvis.w204.volta.VoltaCockpit(
+                s = de.jarvis.w204.volta.VoltaState(
+                    v = vehicle, limit = currentLimit, over = over, obdLive = status.live, clock = clock,
+                    driveMode = if (settings.driveModeLook && status.live) driveMode.label else null,
+                    faults = faults, track = track, mediaAllowed = allowed, slots = slots, apps = apps,
+                    carVersion = carVer, hasCar = hasCar,
+                ),
+                a = remember {
+                    de.jarvis.w204.volta.VoltaActions(
+                        onSettings = { showSettings = true },
+                        onDiagnose = { showDiagnose = true },
+                        onMic = { voice.start() },
+                        onLimitTap = { vm.clearLimit() },
+                        launch = { if (!vm.dock.launch(it)) toast("${it.label} lässt sich nicht starten") },
+                        assign = { slot, app -> vm.dock.assign(slot, app) },
+                        resetSlot = { vm.dock.reset(it) },
+                        icon = { vm.dock.icon(it) },
+                        playPause = { vm.nowPlaying.playPause() },
+                        next = { vm.nowPlaying.next() },
+                        previous = { vm.nowPlaying.previous() },
+                        mediaAccess = { vm.nowPlaying.openAccessSettings() },
+                        carLoaded = { err -> if (err != null) toast(err) else vm.carVersion.value++ },
+                    )
+                },
+                extra = { DashcamButton(vm) },
+            ) {
+                // rechts: Karte / Assistent (Kamera) / Werte – die Kamera läuft hier für die Erkennung weiter
+                CenterPager(vm, Modifier.fillMaxSize()) {
+                    ScenePanel(
+                        vm = vm,
+                        scene = scene,
+                        camGranted = camGranted,
+                        cameraBound = !cameraFull,
+                        showCamera = showCamera,
+                        limit = currentLimit,
+                        over = over,
+                        speed = speed,
+                        onToggle = { showCamera = it },
+                        onExpand = { cameraFull = true },
+                        onRequestPermission = { launcher.launch(requiredPermissions()) },
+                        modifier = Modifier.fillMaxSize(),
+                        framed = false,
+                    )
+                }
+            }
         } else Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
             TopBar(status, message, listening, onMic = { voice.start() }, onSettings = { showSettings = true },
                 faults = faults, faultSeverity = faultSeverity, onDiagnose = { showDiagnose = true }, extra = { DashcamButton(vm) })

@@ -26,6 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -160,7 +161,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                     Section("Darstellung")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Modern", "Klassisch").forEachIndexed { i, label ->
+                        listOf("Modern", "Klassisch", "Volta").forEachIndexed { i, label ->
                             val sel = settings.layout == i
                             Text(
                                 label,
@@ -174,6 +175,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                             )
                         }
                     }
+                    if (settings.layout == 2) VoltaSettings(vm)
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         de.jarvis.w204.ui.Palettes.all.forEachIndexed { i, p ->
@@ -465,4 +467,35 @@ private fun VoicePicker(vm: MainViewModel) {
         modifier = Modifier.clickable { vm.jarvis.preview() }.padding(vertical = 6.dp),
     )
     Hint("Antippen = auswählen und Probe hören. Die natürlichsten Stimmen hat die App „Sprachausgabe von Google“ (Play Store): danach in den Android-Einstellungen unter Sprache → Sprachausgabe die deutsche Stimme herunterladen. Stimmen mit „braucht Internet“ klingen am besten, fallen ohne Netz aber auf eine einfache Stimme zurück.")
+}
+
+
+/** Volta: 3D-Modell und Musik-Anzeige */
+@Composable
+private fun VoltaSettings(vm: MainViewModel) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val ver by vm.carVersion.collectAsStateWithLifecycle()
+    val allowed by vm.nowPlaying.allowed.collectAsStateWithLifecycle()
+    var msg by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val has = remember(ver) { de.jarvis.w204.volta.CarModel.exists(ctx) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val err = de.jarvis.w204.volta.CarModel.import(ctx, uri)
+            msg = err ?: "3D-Modell geladen."
+            if (err == null) vm.carVersion.value++
+        }
+    }
+    LaunchedEffect(Unit) { vm.nowPlaying.refresh() }
+    Spacer(Modifier.height(6.dp))
+    Hint(if (has) "3D-Modell: geladen" else "3D-Modell: keins geladen")
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text(if (has) "Anderes Modell laden" else "3D-Modell laden (.glb)") }
+        if (has) TextButton(onClick = { de.jarvis.w204.volta.CarModel.remove(ctx); vm.carVersion.value++; msg = "Modell entfernt." }) { Text("Entfernen", color = J.dim) }
+    }
+    msg?.let { Hint(it) }
+    Hint("Tipp: Auf sketchfab.com nach „Mercedes W204“ suchen, ein kostenloses Modell im Format glTF/GLB herunterladen (Lizenz beachten) und hier laden. Am besten unter 30 MB.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(if (allowed) "Musik-Anzeige: erlaubt" else "Musik-Anzeige: Zugriff fehlt", color = if (allowed) J.ok else J.warn, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        TextButton(onClick = { vm.nowPlaying.openAccessSettings() }) { Text(if (allowed) "Ändern" else "Erlauben") }
+    }
 }
