@@ -106,7 +106,8 @@ class VoltaActions(
     val next: () -> Unit = {},
     val previous: () -> Unit = {},
     val mediaAccess: () -> Unit = {},
-    val carLoaded: (String?) -> Unit = {},
+    /** Dateiauswahl für das 3D-Modell öffnen */
+    val pickCar: () -> Unit = {},
 )
 
 @Composable
@@ -193,10 +194,6 @@ private fun SmallValue(value: String?, unit: String) {
 
 @Composable
 private fun CarStage(s: VoltaState, a: VoltaActions, modifier: Modifier) {
-    val ctx = LocalContext.current
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) a.carLoaded(CarModel.import(ctx, uri))
-    }
     Box(modifier) {
         Car3D(s.carVersion, Modifier.fillMaxSize().padding(bottom = 96.dp))
         if (!s.hasCar) {
@@ -207,7 +204,7 @@ private fun CarStage(s: VoltaState, a: VoltaActions, modifier: Modifier) {
                 Text(
                     "Modell wählen", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(50)).background(V.text)
-                        .clickable { pick.launch(arrayOf("*/*")) }.padding(horizontal = 16.dp, vertical = 7.dp),
+                        .clickable(onClick = a.pickCar).padding(horizontal = 16.dp, vertical = 7.dp),
                 )
             }
         }

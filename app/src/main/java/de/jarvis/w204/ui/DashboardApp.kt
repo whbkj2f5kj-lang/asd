@@ -195,6 +195,12 @@ fun DashboardApp(vm: MainViewModel) {
             val hasCar = remember(carVer) { de.jarvis.w204.volta.CarModel.exists(context) }
             LaunchedEffect(Unit) { vm.nowPlaying.refresh(); vm.dock.refresh() }
             val toast = { m: String -> android.widget.Toast.makeText(context, m, android.widget.Toast.LENGTH_SHORT).show() }
+            val pickCar = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) {
+                    val err = de.jarvis.w204.volta.CarModel.import(context, uri)
+                    if (err != null) toast(err) else vm.carVersion.value++
+                }
+            }
             de.jarvis.w204.volta.VoltaCockpit(
                 s = de.jarvis.w204.volta.VoltaState(
                     v = vehicle, limit = currentLimit, over = over, obdLive = status.live, clock = clock,
@@ -216,7 +222,7 @@ fun DashboardApp(vm: MainViewModel) {
                         next = { vm.nowPlaying.next() },
                         previous = { vm.nowPlaying.previous() },
                         mediaAccess = { vm.nowPlaying.openAccessSettings() },
-                        carLoaded = { err -> if (err != null) toast(err) else vm.carVersion.value++ },
+                        pickCar = { pickCar.launch(arrayOf("*/*")) },
                     )
                 },
                 extra = { DashcamButton(vm) },
