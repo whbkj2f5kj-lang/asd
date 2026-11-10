@@ -53,7 +53,7 @@ class NowPlaying(context: Context) {
     private val cb = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = publish()
         override fun onPlaybackStateChanged(state: PlaybackState?) = publish()
-        override fun onSessionDestroyed() = refresh()
+        override fun onSessionDestroyed() { refresh() }
     }
     private val sessions = MediaSessionManager.OnActiveSessionsChangedListener { refresh() }
     private var listening = false
@@ -69,10 +69,12 @@ class NowPlaying(context: Context) {
         runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
-    fun refresh() = main.post {
+    fun refresh() { main.post { refreshNow() } }
+
+    private fun refreshNow() {
         val ok = hasAccess()
         _allowed.value = ok
-        if (!ok) { _track.value = null; return@post }
+        if (!ok) { _track.value = null; return }
         val list = runCatching { msm.getActiveSessions(component) }.getOrNull().orEmpty()
         if (!listening) runCatching { msm.addOnActiveSessionsChangedListener(sessions, component, main); listening = true }
         val best = list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: list.firstOrNull()
