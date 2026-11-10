@@ -90,6 +90,10 @@ jobs:
           else
             msg=$(grep -E "^e: |error|Exception|FAILED|What went wrong" paparazzi.log | head -40 | sed -e 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
             echo "::warning title=Vorschau fehlgeschlagen::$msg"
+            find app/build/test-results -name "*ScreenshotTest*.xml" -exec grep -h -A12 "<failure" {} \; | head -60 || true
           fi
+          # auch bei Teilfehlern: vorhandene Vorschaubilder veröffentlichen
+          for f in app/src/test/snapshots/images/*.png; do [ -f "$f" ] || continue
+            n=$(basename "$f" .png | sed 's/.*ScreenshotTest_//'); cp "$f" "vorschau_$n.png"; done
           gh release delete neueste --yes --cleanup-tag || true
           gh release create neueste DashboardW204.apk DashboardW204-PC.apk vorschau_*.png --title "Dashboard W204 (neueste Version)" --notes "DashboardW204.apk = fürs Radio. DashboardW204-PC.apk = für BlueStacks/Emulator. Gebaut aus ${GITHUB_SHA::7}."
