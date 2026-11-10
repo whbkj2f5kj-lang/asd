@@ -66,7 +66,14 @@ public:
     QDBusMessage &operator<<(const QVariant &) { return *this; }
 };
 
-class QDBusPendingCall {};
+class QDBusPendingCall {
+public:
+    bool isError() const { return true; }
+    bool isValid() const { return false; }
+    bool isFinished() const { return true; }
+    QDBusError error() const { return {}; }
+    void waitForFinished() {}
+};
 
 template <typename T> class QDBusReply {
 public:
