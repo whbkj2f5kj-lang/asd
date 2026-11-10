@@ -172,10 +172,17 @@ static void voltaLogOpen()
 }
 #endif
 
+void voltaPortStartMapProxy();   // volta_mapproxy.cpp
+
 static void voltaPortPrepare()
 {
+#ifndef Q_OS_ANDROID
+    // auf dem Linux-Testrechner nur auf Wunsch (dort gibt es sonst Voltas Python-Dienst)
+    if (qEnvironmentVariableIsSet("VOLTA_PORT_PROXY")) voltaPortStartMapProxy();
+#endif
 #ifdef Q_OS_ANDROID
     voltaLogOpen();
+    voltaPortStartMapProxy();
     const QString src = QStringLiteral("assets:/volta");
     const QString dst = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/volta");
     const QString stampFile = dst + QStringLiteral("/.port_stamp");
