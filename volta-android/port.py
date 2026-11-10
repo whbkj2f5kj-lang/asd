@@ -84,4 +84,9 @@ patch("src/main.cpp", [
     (r'^(\s*)qputenv\("QT_QPA_PLATFORM", "xcb"\);',
      r'\1{\n#ifndef Q_OS_ANDROID\n\1qputenv("QT_QPA_PLATFORM", "xcb");\n#endif\n\1}', 1),
 ])
+# Android-Dateiauswahl liefert content://-Adressen: vor dem Einlesen in eine echte Datei kopieren
+patch("src/core/CarModelManager.cpp", [
+    (r'^#include "CarModelManager.h"\n', '#include "CarModelManager.h"\nQString voltaPortLocalFile(const QString &path);\n', 1),
+    (r"QString p = srcPath;", "QString p = voltaPortLocalFile(srcPath);", 2),
+])
 print("port.py: ok")
