@@ -8,10 +8,11 @@
 #include <QStandardPaths>
 #include <QDebug>
 
-#ifdef Q_OS_ANDROID
 #include <QGuiApplication>
-#include <QScreen>
+#include <QWindow>
 #include <QTimer>
+#ifdef Q_OS_ANDROID
+#include <QScreen>
 #include <QSysInfo>
 #include <QDateTime>
 #include <QJniObject>
@@ -179,6 +180,13 @@ static void voltaPortPrepare()
 #ifndef Q_OS_ANDROID
     // auf dem Linux-Testrechner nur auf Wunsch (dort gibt es sonst Voltas Python-Dienst)
     if (qEnvironmentVariableIsSet("VOLTA_PORT_PROXY")) voltaPortStartMapProxy();
+    // nur fuer die Kontroll-Bildschirmfotos: Auto-Ansicht verkleinern, damit die Karte daneben sichtbar ist
+    if (qEnvironmentVariableIsSet("VOLTA_PORT_SPLIT"))
+        QTimer::singleShot(6000, qApp, []() {
+            const auto wins = QGuiApplication::allWindows();
+            for (QWindow *w : wins)
+                if (w->property("carFullScreen").isValid()) w->setProperty("carFullScreen", false);
+        });
 #endif
 #ifdef Q_OS_ANDROID
     voltaLogOpen();
