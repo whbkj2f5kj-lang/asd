@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Bereitet einen unveraenderten VoltaOS-Checkout fuer den Android-Port vor.
+
+Aufruf: port.py <voltaos-verzeichnis>
+Aendert nur den Build (CMakeLists.txt) und eine Zeile in main.cpp; alles andere
+kommt ueber Platzhalter aus diesem Verzeichnis (shim/, qmlstubs/). GPL-3.0-or-later
+"""
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+
+
+def patch(path, edits):
+    p = root / path
+    s = p.read_text(encoding="utf-8")
+    for old, new, count in edits:
+        found = len(re.findall(old, s, flags=re.M))
+        if found != count:
+            sys.exit(f"port.py: {path}: erwartet {count}x, gefunden {found}x: {old}")
+        s = re.sub(old, new, s, flags=re.M)
+    p.write_text(s, encoding="utf-8")
+
+
+patch("CMakeLists.txt", [
+    (r"COMPONENTS WebEngineQuick WebSockets Network\)", "COMPONENTS WebSockets Network Svg)", 1),
+    (r"^find_package\(X11 REQUIRED\)\n", "", 1),
+    (r"^find_package\(PkgConfig REQUIRED\)\n", "", 1),
+    (r"^find_package\(Qt6 OPTIONAL_COMPONENTS WaylandCompositor QUIET\)\n", "", 2),
+    (r"^\s*src/wayland/Volta\w+\.(cpp|h)\n", "", 7),
+    (r"Qt6::WebEngineQuick Qt6::WebSockets", "Qt6::WebSockets Qt6::Svg", 1),
+    (r"^\s*\$\{X11_LIBRARIES\}\n", "", 1),
+    (r"^pkg_check_modules\((LIBUSB|AVCODEC) .*\n", "", 2),
+    (r" PkgConfig::LIBUSB PkgConfig::AVCODEC\)", ")", 1),
+])
+
+with open(root / "CMakeLists.txt", "a", encoding="utf-8") as f:
+    f.write(r'''
+
+# ── Android-Port (volta-android/port.py) ─────────────────────────────────────
+if(NOT VOLTA_PORT_DIR)
+    message(FATAL_ERROR "VOLTA_PORT_DIR fehlt")
+endif()
+if(NOT VOLTA_PORT_STAMP)
+    set(VOLTA_PORT_STAMP "dev")
+endif()
+target_sources(VoltaOS PRIVATE
+    ${VOLTA_PORT_DIR}/volta_port.cpp
+    ${VOLTA_PORT_DIR}/shim/volta_webshim.h)
+target_include_directories(VoltaOS BEFORE PRIVATE
+    ${VOLTA_PORT_DIR}/shim ${VOLTA_PORT_DIR}/shim/QtWebEngineQuick)
+target_compile_definitions(VoltaOS PRIVATE VOLTA_PORT_STAMP="${VOLTA_PORT_STAMP}")
+file(GLOB_RECURSE VOLTA_PORT_STUBS ${VOLTA_PORT_DIR}/qmlstubs/*)
+qt_add_resources(VoltaOS "volta_port_stubs"
+    PREFIX "/qt/qml"
+    BASE ${VOLTA_PORT_DIR}/qmlstubs
+    FILES ${VOLTA_PORT_STUBS})
+if(ANDROID)
+    set_target_properties(VoltaOS PROPERTIES
+        QT_ANDROID_PACKAGE_SOURCE_DIR ${VOLTA_PORT_DIR}/android
+        QT_ANDROID_PACKAGE_NAME "de.jarvis.volta"
+        QT_ANDROID_VERSION_NAME "${VOLTA_PORT_VERSION}"
+        QT_ANDROID_VERSION_CODE "${VOLTA_PORT_CODE}")
+    if(VOLTA_OPENSSL_DIR)
+        include(${VOLTA_OPENSSL_DIR}/android_openssl.cmake)
+        add_android_openssl_libraries(VoltaOS)
+    endif()
+endif()
+''')
+
+patch("src/main.cpp", [
+    (r'^(\s*)qputenv\("QT_QPA_PLATFORM", "xcb"\);',
+     r'\1{\n#ifndef Q_OS_ANDROID\n\1qputenv("QT_QPA_PLATFORM", "xcb");\n#endif\n\1}', 1),
+])
+print("port.py: ok")
