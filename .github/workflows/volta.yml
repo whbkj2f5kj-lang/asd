@@ -101,7 +101,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          host: linux
+          host: all_os
           target: android
           arch: ${{ matrix.qtarch }}
           modules: ${{ env.QT_MODULES }}
