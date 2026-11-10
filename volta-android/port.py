@@ -105,6 +105,10 @@ endif()
 patch("src/main.cpp", [
     (r'^(\s*)qputenv\("QT_QPA_PLATFORM", "xcb"\);',
      r'\1{\n#ifndef Q_OS_ANDROID\n\1qputenv("QT_QPA_PLATFORM", "xcb");\n#endif\n\1}', 1),
+    # Voltas QML-Modul liegt in den Ressourcen unter :/VoltaApp. Auf Linux findet Qt es zusaetzlich als
+    # Ordner neben dem Programm; auf Android gibt es den nicht -> "VoltaApp contains no type named Main".
+    (r'^(\s*)engine\.addImportPath\("/usr/local/qml"\);',
+     r'\1engine.addImportPath("/usr/local/qml");\n\1engine.addImportPath(QStringLiteral("qrc:/"));', 1),
 ])
 # Android-Dateiauswahl liefert content://-Adressen: vor dem Einlesen in eine echte Datei kopieren
 patch("src/core/CarModelManager.cpp", [

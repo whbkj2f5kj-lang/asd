@@ -146,10 +146,12 @@ jobs:
           cp -r mlinstall stage/third_party/maplibre
           ls stage/third_party/maplibre stage/third_party/maplibre/lib stage/third_party/maplibre/plugins/* || true
           export LD_LIBRARY_PATH=$PWD/mlinstall/lib:$LD_LIBRARY_PATH
+          # Programm allein in einen eigenen Ordner: wie auf Android ohne die Build-Dateien daneben
+          mkdir -p stage/bin && cp $B/VoltaOS stage/bin/
           shot() { # name breite hoehe wartezeit [umgebung...]
             n=$1; w=$2; h=$3; ms=$4; shift 4
             env LIBGL_ALWAYS_SOFTWARE=1 VOLTA_PORT_PROXY=1 VOLTA_DIR=$PWD/stage VOLTA_SHOT=$PWD/out/$n.png:$ms "$@" \
-              timeout $((ms / 1000 + 20)) xvfb-run -a -s "-screen 0 ${w}x${h}x24" $B/VoltaOS > out/$n.log 2>&1 || true
+              timeout $((ms / 1000 + 20)) xvfb-run -a -s "-screen 0 ${w}x${h}x24" $PWD/stage/bin/VoltaOS > out/$n.log 2>&1 || true
             grep -E "mapproxy|maplibre|MapLibre|geoservices" out/$n.log | head -n 12 || true
           }
           shot vorschau_volta_setup 1280 720 12000
